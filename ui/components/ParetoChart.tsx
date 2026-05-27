@@ -20,10 +20,12 @@ export function ParetoChart({
   pareto,
   xAxis = "cost",
   yAxis = "correctness",
+  showAnnotation = true,
 }: {
   pareto: Pareto;
   xAxis?: string;
   yAxis?: string;
+  showAnnotation?: boolean;
 }) {
   const width = 760;
   const height = 460;
@@ -33,6 +35,7 @@ export function ParetoChart({
   const innerH = height - padding.top - padding.bottom;
 
   const baselineId = pareto.baseline_id;
+  const winnerId = pareto.winner_id;
   const frontierSet = new Set(pareto.frontier_ids);
 
   const points = useMemo(() => {
@@ -45,9 +48,16 @@ export function ParetoChart({
         y: padding.top + (1 - y) * innerH,
         onFrontier: frontierSet.has(c.candidate_id),
         isBaseline: c.candidate_id === baselineId,
+        isWinner: c.candidate_id === winnerId,
       };
     });
-  }, [pareto, xAxis, yAxis, innerW, innerH, frontierSet, baselineId, padding.left, padding.top]);
+  }, [
+    pareto, xAxis, yAxis, innerW, innerH, frontierSet,
+    baselineId, winnerId, padding.left, padding.top,
+  ]);
+
+  const baselinePt = points.find((p) => p.isBaseline);
+  const winnerPt = points.find((p) => p.isWinner);
 
   // Frontier path — sort by x asc, draw a smooth polyline.
   const frontierPath = useMemo(() => {
@@ -176,25 +186,64 @@ export function ParetoChart({
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={6}
+                  r={p.isWinner ? 8 : 6}
                   fill="#10F09C"
                   stroke="rgba(16,240,156,0.6)"
-                  strokeWidth="2"
+                  strokeWidth={p.isWinner ? 3 : 2}
                 >
                   <title>{`${p.candidate.label} — ${p.candidate.candidate_id}`}</title>
                 </circle>
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={6}
+                  r={p.isWinner ? 8 : 6}
                   fill="none"
                   stroke="#10F09C"
                   strokeWidth="2"
                   className="pareto-dot-ring"
                 />
+                {p.isWinner && (
+                  <g
+                    style={{
+                      animation:
+                        "fade-up 400ms cubic-bezier(0.16, 1, 0.3, 1) 700ms both",
+                    }}
+                  >
+                    <text
+                      x={p.x + 14}
+                      y={p.y - 6}
+                      className="fill-improved"
+                      fontFamily="var(--font-geist-mono)"
+                      fontSize="12"
+                    >
+                      ▸ winner
+                    </text>
+                  </g>
+                )}
               </g>
             ))}
         </g>
+
+        {/* annotation — baseline label + GEPA shift arrow */}
+        {showAnnotation && baselinePt && winnerPt && (
+          <g
+            style={{
+              animation:
+                "fade-up 400ms cubic-bezier(0.16, 1, 0.3, 1) 900ms both",
+            }}
+          >
+            <text
+              x={baselinePt.x - 12}
+              y={baselinePt.y + 4}
+              textAnchor="end"
+              className="fill-ink-muted"
+              fontFamily="var(--font-geist-mono)"
+              fontSize="12"
+            >
+              baseline ◂
+            </text>
+          </g>
+        )}
       </svg>
 
       <div className="mt-2 flex gap-6 text-ui-sm text-ink-muted">
