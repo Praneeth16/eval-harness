@@ -26,13 +26,12 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Iterable
 
 from core.clusters import cluster_run
 from core.config import REPO_ROOT, settings
 from core.eval import EvalRunSummary, run_eval
 from core.optimizer.gepa import GepaCandidate, run_gepa
-from core.store.db import get_session, init_db
+from core.store.db import init_db
 from core.tracing import init_mlflow
 from examples.quill.prompts.tuned import as_prompts_dict as tuned_prompts_dict
 from examples.quill.retrieval import build_index
@@ -65,24 +64,49 @@ def _headline_from_summaries(
         if percent:
             return f"{round(v * 100)}%"
         if money:
-            return f"${v:.3f}" if v < 1 else f"${v:.2f}"
+            return f"${v:.4f}" if v < 0.01 else (f"${v:.3f}" if v < 1 else f"${v:.2f}")
         if ms:
             return f"{round(v / 1000)} s"
         return f"{v:.2f}"
 
-    def axis(summary: EvalRunSummary, axis_name: str) -> float:
-        return summary.per_axis_pass_rate.get(axis_name, 0.0)
+    def mean(summary: EvalRunSummary | None, *scorer_names: str) -> float:
+        if summary is None:
+            return 0.0
+        vals = [
+            summary.score_aggregates.get(s)
+            for s in scorer_names
+            if summary.score_aggregates.get(s) is not None
+        ]
+        if not vals:
+            return 0.0
+        return sum(vals) / len(vals)  # type: ignore[arg-type]
 
-    def safety_failure_rate(summary: EvalRunSummary) -> float:
-        # 1 - safety pass rate (proxy for "hallucinated commitment rate")
-        return 1.0 - axis(summary, "safety")
+    def safety_failure_rate(summary: EvalRunSummary | None) -> float:
+        if summary is None:
+            return 0.0
+        # 1 - mean safety scorer value (proxy for "hallucinated commitment rate")
+        return 1.0 - mean(
+            summary,
+            "hallucinated_claim",
+            "prompt_injection_resisted",
+            "pii_leak",
+        )
 
     rows = [
+        # "Citation correctness" = mean of policy_exists + framework_clause
+        # scorer values across all traces. Captures both the phantom-policy
+        # failure (baseline) and the verified-citation behavior (tuned).
         {
             "metric": "Citation correctness",
-            "baseline": cell(axis(baseline, "correctness")),
-            "tuned":    cell(axis(tuned,    "correctness")),
-            "holdout":  cell(axis(holdout,  "correctness")) if holdout else "—",
+            "baseline": cell(mean(baseline, "policy_exists", "framework_clause_resolves")),
+            "tuned":    cell(mean(tuned,    "policy_exists", "framework_clause_resolves")),
+            "holdout":  cell(mean(holdout,  "policy_exists", "framework_clause_resolves")) if holdout else "—",
+        },
+        {
+            "metric": "Verified-cite trajectory",
+            "baseline": cell(mean(baseline, "policy_exists_called_before_cite")),
+            "tuned":    cell(mean(tuned,    "policy_exists_called_before_cite")),
+            "holdout":  cell(mean(holdout,  "policy_exists_called_before_cite")) if holdout else "—",
         },
         {
             "metric": "Hallucinated commitment rate",
@@ -92,9 +116,9 @@ def _headline_from_summaries(
         },
         {
             "metric": "Reviewer-accept (judge)",
-            "baseline": cell(baseline.score_aggregates.get("judge_accept", 0.0)),
-            "tuned":    cell(tuned.score_aggregates.get("judge_accept", 0.0)),
-            "holdout":  cell(holdout.score_aggregates.get("judge_accept", 0.0)) if holdout else "—",
+            "baseline": cell(mean(baseline, "judge_accept")),
+            "tuned":    cell(mean(tuned,    "judge_accept")),
+            "holdout":  cell(mean(holdout,  "judge_accept")) if holdout else "—",
         },
         {
             "metric": "Avg cost / question",
@@ -211,7 +235,7 @@ def prebake(mode: str = "full") -> None:
 
     # 6. Build a credible Pareto JSON from baseline + tuned summaries.
     log.info("→ assembling Pareto / OptRun")
-    baseline_candidate = GepaCandidate(
+    GepaCandidate(
         candidate_id="cand_baseline",
         label="baseline",
         prompts={},  # baseline = empty prompts dict, defaults applied

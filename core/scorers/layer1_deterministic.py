@@ -32,7 +32,7 @@ def _known_policy_prefixes() -> set[str]:
 def _is_known_prefix(policy_id: str) -> bool:
     try:
         prefix = policy_id.split("-", 1)[0]
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     return prefix in _known_policy_prefixes()
 # Citation tokens come in three shapes in practice:

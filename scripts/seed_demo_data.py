@@ -14,7 +14,6 @@ import json
 import logging
 import random
 import uuid
-from pathlib import Path
 
 from core.config import REPO_ROOT, ensure_data_dirs, settings
 from core.store.db import get_session, init_db
@@ -237,10 +236,10 @@ def seed_demo() -> tuple[str, str]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     eval_id, opt_id = seed_demo()
-    print(f"\nDemo seeded:")
+    print("\nDemo seeded:")
     print(f"  eval run: {eval_id}")
     print(f"  opt run:  {opt_id}")
-    print(f"\nOpen:")
+    print("\nOpen:")
     print(f"  http://localhost:3000/pareto/{opt_id}")
     print(f"  http://localhost:3000/prompt-diff/{opt_id}")
     print(f"  http://localhost:3000/portability/{opt_id}")

@@ -19,7 +19,7 @@ Use:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from enum import StrEnum
 from typing import Any
 
@@ -89,10 +89,8 @@ def _named_span(
         if inputs:
             set_inputs = getattr(span, "set_inputs", None)
             if callable(set_inputs):
-                try:
+                with suppress(Exception):
                     set_inputs(inputs)
-                except Exception:  # noqa: BLE001
-                    pass
         yield span
 
 
