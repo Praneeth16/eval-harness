@@ -18,9 +18,10 @@ Use:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from enum import StrEnum
-from typing import Any, Callable, Iterator
+from typing import Any
 
 import mlflow
 from mlflow.entities import SpanType as MlflowSpanType

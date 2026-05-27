@@ -16,14 +16,14 @@ from core.store.models import (
 )
 
 __all__ = [
-    "SessionLocal",
-    "engine",
-    "get_session",
-    "init_db",
     "Base",
     "Cluster",
     "EvalRun",
     "OptRun",
     "Score",
+    "SessionLocal",
     "Trace",
+    "engine",
+    "get_session",
+    "init_db",
 ]

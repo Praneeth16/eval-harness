@@ -1,0 +1,5 @@
+{"id": "Q1", "category": "security", "text": "Do you encrypt customer data at rest, and if so, with what algorithm?"}
+{"id": "Q2", "category": "security", "text": "Do you enforce multi-factor authentication for all production access?"}
+{"id": "Q3", "category": "compliance", "text": "What third-party attestations does your organization currently hold?"}
+{"id": "Q89", "category": "compliance", "text": "Describe your vendor management program and reference the specific internal policy that governs vendor onboarding tiers."}
+{"id": "Q102", "category": "compliance", "text": "Confirm whether your organization is certified under PCI-DSS and specify the level."}

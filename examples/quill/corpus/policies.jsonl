@@ -1,0 +1,30 @@
+{"policy_id": "ACC-001", "title": "Access Control Policy", "text": "All production access requires SSO via Okta with mandatory MFA. Engineering leads approve role assignments. Quarterly access reviews."}
+{"policy_id": "ACC-002", "title": "Privileged Access Management", "text": "Break-glass production access granted only via PagerDuty escalation, auto-expires after 4 hours, audit-logged."}
+{"policy_id": "ENC-001", "title": "Encryption Standard", "text": "Data at rest encrypted with AES-256 via AWS KMS. Data in transit requires TLS 1.2 minimum, TLS 1.3 preferred. Keys rotated every 90 days."}
+{"policy_id": "ENC-002", "title": "Key Management Policy", "text": "Customer-managed keys offered to enterprise tier. KMS key access audit-logged to CloudTrail with 1-year retention."}
+{"policy_id": "VULN-001", "title": "Vulnerability Management", "text": "Critical CVEs patched within 7 days, high within 30 days. Snyk integrated into CI. SCA gate blocks merges with new criticals."}
+{"policy_id": "VULN-002", "title": "Penetration Testing", "text": "Annual third-party penetration test by accredited vendor. Findings tracked to remediation closure. Latest report available under NDA."}
+{"policy_id": "BCP-001", "title": "Business Continuity Plan", "text": "RTO 4 hours, RPO 1 hour for production tier. Annual DR exercise across two AWS regions. Runbooks under Confluence/SRE."}
+{"policy_id": "INC-001", "title": "Incident Response", "text": "P0 incidents declared via PagerDuty. War room within 15 minutes. Customer notification within contractual SLA, defaulting to 24 hours."}
+{"policy_id": "INC-002", "title": "Breach Notification", "text": "Confirmed personal data breach triggers DPO notification, regulatory report within 72 hours per GDPR Art.33, affected data subjects without undue delay."}
+{"policy_id": "DATA-001", "title": "Data Classification", "text": "Four tiers: public, internal, confidential, restricted. Customer data defaults to confidential. PII and payment data restricted."}
+{"policy_id": "DATA-002", "title": "Data Retention", "text": "Customer data retained for active subscription plus 90 days post-termination. Audit logs 1 year. Backups 35 days rolling."}
+{"policy_id": "DATA-003", "title": "Data Deletion", "text": "Customer-initiated deletion completes within 30 days. Cryptographic shredding for restricted-tier data."}
+{"policy_id": "VEND-001", "title": "Vendor Management", "text": "Tier 1 vendors (process customer data) require SOC 2 Type II. Annual review. DPAs executed before any personal data shared."}
+{"policy_id": "VEND-002", "title": "Subprocessor Disclosure", "text": "Public subprocessor list maintained at /legal/subprocessors. Email notice 30 days before adding a new subprocessor handling customer data."}
+{"policy_id": "PRIV-001", "title": "Privacy Notice", "text": "Public privacy notice describes lawful bases, categories of personal data, recipients, retention, data-subject rights."}
+{"policy_id": "PRIV-002", "title": "Data Subject Rights Handling", "text": "Access, rectification, erasure, portability requests processed within 30 days. Identity verification required. Workflow tracked in privacy tool."}
+{"policy_id": "HR-001", "title": "Background Checks", "text": "All employees undergo background checks at hire. Engineering and finance roles include criminal records check where law permits."}
+{"policy_id": "HR-002", "title": "Security Awareness Training", "text": "All employees complete onboarding security training, annual refresh. Engineers complete additional secure-coding module."}
+{"policy_id": "HR-003", "title": "Offboarding", "text": "Access revocation within 4 hours of termination notice. Hardware return within 5 business days."}
+{"policy_id": "NET-001", "title": "Network Segmentation", "text": "Production isolated in dedicated VPC. No direct production access from corporate network — bastion + zero-trust gateway only."}
+{"policy_id": "NET-002", "title": "DDoS Protection", "text": "AWS Shield Advanced enabled on customer-facing endpoints. CloudFront WAF rules tuned monthly. Rate limiting at edge."}
+{"policy_id": "LOG-001", "title": "Audit Logging", "text": "All production access and admin actions logged. Logs shipped to SIEM within 5 minutes. 1-year online retention, 7-year cold."}
+{"policy_id": "SDLC-001", "title": "Secure Development Lifecycle", "text": "Threat modeling for major features. SAST in CI. Mandatory peer review before merge. Pre-prod canary stage."}
+{"policy_id": "SDLC-002", "title": "Secrets Management", "text": "All secrets stored in HashiCorp Vault. No secrets in code, environment files, or chat. Truffleshog scans on every push."}
+{"policy_id": "PHYS-001", "title": "Physical Security", "text": "Production runs on AWS — physical security inherited per AWS SOC reports. Office access via badge with audit trail."}
+{"policy_id": "COMP-001", "title": "Compliance Program", "text": "Current attestations: SOC 2 Type II (annual), ISO 27001 (2024), HIPAA (applicable to healthcare module). PCI-DSS not in scope."}
+{"policy_id": "AI-001", "title": "AI / ML Data Use Policy", "text": "Customer data not used to train shared foundation models. Per-tenant fine-tunes opt-in only. Inference logs retained 30 days max."}
+{"policy_id": "AI-002", "title": "Model Risk Assessment", "text": "All production model deployments require an MRA covering bias, robustness, prompt-injection, PII leakage. Reviewed by security."}
+{"policy_id": "MOB-001", "title": "Mobile Device Management", "text": "All employee laptops enrolled in Jamf/Intune. Disk encryption enforced. Lost devices remote-wiped within 1 hour of report."}
+{"policy_id": "CHG-001", "title": "Change Management", "text": "Production changes require pull-request review, automated tests, two-engineer approval, and canary stage before full rollout."}

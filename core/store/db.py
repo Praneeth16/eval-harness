@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -37,7 +37,7 @@ def _build_engine() -> Engine:
         # WAL prevents lock storms when the eval runner writes concurrently
         # with the API server reading. Apply on every new connection.
         @event.listens_for(eng, "connect")
-        def _set_sqlite_pragma(dbapi_connection, _):  # noqa: ANN001
+        def _set_sqlite_pragma(dbapi_connection, _):
             cur = dbapi_connection.cursor()
             cur.execute("PRAGMA journal_mode=WAL;")
             cur.execute("PRAGMA synchronous=NORMAL;")
