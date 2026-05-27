@@ -73,33 +73,93 @@ def _is_retryable_status(exc: BaseException) -> bool:
 
 
 class LLMClient:
-    """Thin OpenAI-SDK wrapper pointed at OpenRouter with retry + cost tracking."""
+    """Thin OpenAI-SDK wrapper. Two providers, one client interface.
+
+    Provider selection:
+      * `LLM_PROVIDER=gemini`   → Google AI Studio's OpenAI-compatible
+        endpoint (default). Bare slugs like `gemini-2.5-flash`.
+      * `LLM_PROVIDER=openrouter` → OpenRouter. Slugs like
+        `google/gemini-2.5-flash`, `anthropic/claude-sonnet-4-6`.
+
+    A specific call can route to OpenRouter even when the default provider
+    is Gemini by prefixing the model slug with `openrouter:` — used by the
+    cross-model portability run for non-Google models.
+    """
 
     def __init__(
         self,
+        provider: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         app_name: str | None = None,
         referer: str | None = None,
         timeout_s: float | None = None,
     ) -> None:
-        key = api_key or settings.openrouter_api_key
-        if not key:
-            log.warning(
-                "OPENROUTER_API_KEY is empty — calls will fail. "
-                "Copy .env.example to .env and fill the key."
+        self.provider = (provider or settings.llm_provider or "gemini").lower()
+        self._or_client: openai.OpenAI | None = None
+        self._gemini_client: openai.OpenAI | None = None
+
+        # Gemini (AI Studio OpenAI-compat) client.
+        gkey = (api_key if self.provider == "gemini" else None) or settings.gemini_api_key
+        if gkey or self.provider == "gemini":
+            if not gkey and self.provider == "gemini":
+                log.warning(
+                    "GEMINI_API_KEY is empty — Gemini calls will fail. "
+                    "Drop the key into .env."
+                )
+            self._gemini_client = openai.OpenAI(
+                api_key=gkey or "missing",
+                base_url=base_url
+                if self.provider == "gemini" and base_url
+                else settings.gemini_base_url,
+                timeout=timeout_s or settings.llm_timeout_s,
             )
 
-        self._client = openai.OpenAI(
-            api_key=key or "missing",
-            base_url=base_url or settings.openrouter_base_url,
-            default_headers={
-                # OpenRouter recommends sending these for analytics + rate-limit attribution.
-                "HTTP-Referer": referer or settings.openrouter_referer,
-                "X-Title": app_name or settings.openrouter_app_name,
-            },
-            timeout=timeout_s or settings.llm_timeout_s,
-        )
+        # OpenRouter client (used for `openrouter:` prefixed models, or as
+        # the default if `LLM_PROVIDER=openrouter`).
+        okey = (api_key if self.provider == "openrouter" else None) or settings.openrouter_api_key
+        if okey or self.provider == "openrouter":
+            if not okey and self.provider == "openrouter":
+                log.warning(
+                    "OPENROUTER_API_KEY is empty — OpenRouter calls will fail. "
+                    "Drop the key into .env."
+                )
+            self._or_client = openai.OpenAI(
+                api_key=okey or "missing",
+                base_url=base_url
+                if self.provider == "openrouter" and base_url
+                else settings.openrouter_base_url,
+                default_headers={
+                    "HTTP-Referer": referer or settings.openrouter_referer,
+                    "X-Title": app_name or settings.openrouter_app_name,
+                },
+                timeout=timeout_s or settings.llm_timeout_s,
+            )
+
+    def _route(self, slug: str) -> tuple[openai.OpenAI, str]:
+        """Pick the right SDK client + clean slug for a given model string."""
+        if slug.startswith("openrouter:"):
+            if self._or_client is None:
+                raise RuntimeError(
+                    "model requested OpenRouter routing but OPENROUTER_API_KEY is unset"
+                )
+            return self._or_client, slug.removeprefix("openrouter:")
+        # OpenRouter-flavored slug (`vendor/model`) → OpenRouter.
+        if "/" in slug:
+            if self._or_client is None:
+                raise RuntimeError(
+                    f"model {slug!r} looks like an OpenRouter slug but "
+                    "OPENROUTER_API_KEY is unset"
+                )
+            return self._or_client, slug
+        # Bare slug → default provider's client (Gemini for AI Studio).
+        if self.provider == "gemini":
+            if self._gemini_client is None:
+                raise RuntimeError("Gemini client not initialized")
+            return self._gemini_client, slug
+        # OpenRouter as default but bare slug — pass through.
+        assert self._or_client is not None
+        return self._or_client, slug
 
     @retry(
         retry=retry_if_exception_type(_RETRYABLE) | retry_if_exception_type(APIStatusError),
@@ -109,9 +169,9 @@ class LLMClient:
         ),
         reraise=True,
     )
-    def _chat_raw(self, **kwargs: Any) -> Any:
+    def _chat_raw(self, *, _client: openai.OpenAI, **kwargs: Any) -> Any:
         try:
-            return self._client.chat.completions.create(**kwargs)
+            return _client.chat.completions.create(**kwargs)
         except APIStatusError as e:
             if _is_retryable_status(e):
                 raise
@@ -128,7 +188,9 @@ class LLMClient:
         **extra: Any,
     ) -> LLMResponse:
         """Single chat completion call. Returns an `LLMResponse` with usage filled."""
-        slug = resolve_alias(model or settings.default_model)
+        requested = model or settings.default_model
+        client, routed_slug = self._route(requested)
+        slug = resolve_alias(routed_slug)
         params: dict[str, Any] = {
             "model": slug,
             "messages": messages,
@@ -141,10 +203,18 @@ class LLMClient:
             params["tools"] = tools
         if response_format:
             params["response_format"] = response_format
+        # Gemini-only knob: disable thinking by default to keep prebake fast.
+        # No-op on OpenRouter / other providers (they ignore unknown params).
+        if (
+            self.provider == "gemini"
+            and "reasoning_effort" not in extra
+            and settings.llm_reasoning_effort
+        ):
+            params["reasoning_effort"] = settings.llm_reasoning_effort
         params.update(extra)
 
         t0 = time.perf_counter()
-        raw = self._chat_raw(**params)
+        raw = self._chat_raw(_client=client, **params)
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         choice = raw.choices[0]

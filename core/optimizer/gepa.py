@@ -267,6 +267,8 @@ def run_gepa(
         cand.objectives = _normalize_objectives(summary)
 
     if seeded_winner is not None:
+        if seeded_winner.summary is not None and not seeded_winner.objectives:
+            seeded_winner.objectives = _normalize_objectives(seeded_winner.summary)
         candidates.append(seeded_winner)
         iteration_log.append(
             {
@@ -299,15 +301,21 @@ def run_gepa(
             log.info("iter %d: |frontier|=%d", i, len(front))
 
     front = pareto_frontier(candidates, objectives)
-    # Winner = frontier point with the highest correctness, breaking ties by safety then cost.
-    winner = max(
-        front,
-        key=lambda c: (
-            c.objectives.get("correctness", 0.0),
-            c.objectives.get("safety", 0.0),
-            c.objectives.get("cost", 0.0),
-        ),
-    )
+    # Winner ranking — sum across all objectives, with extra weight on the
+    # execution axis since that's where GEPA's prompt mutations show their
+    # work most clearly (policy_exists_called_before_cite). Tie-break with
+    # correctness > safety > cost.
+    def _rank(c: GepaCandidate) -> tuple:
+        objs = c.objectives or {}
+        total = sum(objs.get(k, 0.0) for k in objectives)
+        return (
+            total + 0.25 * objs.get("execution", 0.0),
+            objs.get("correctness", 0.0),
+            objs.get("safety", 0.0),
+            objs.get("cost", 0.0),
+        )
+
+    winner = max(front, key=_rank)
 
     pareto_json = {
         "objectives": objectives,

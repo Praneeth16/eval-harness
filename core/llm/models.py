@@ -26,27 +26,45 @@ class ModelSpec:
 
 
 # Resolved at load time; latest-aliases are mapped to the current best-known
-# concrete slug. Keep `google/gemini-flash-latest` as the rolling default.
+# concrete slug. Bare `gemini-*` slugs map to AI-Studio-flavored slugs (no
+# provider prefix), `google/...` slugs map to OpenRouter-flavored slugs.
 _ALIAS_MAP: dict[str, str] = {
     "google/gemini-flash-latest": "google/gemini-2.5-flash",
+    # Strip `openrouter:` prefix used in PORTABILITY_MODELS for routing only.
+    "openrouter:gemini-2.5-flash": "google/gemini-2.5-flash",
 }
 
 
 MODEL_REGISTRY: dict[str, ModelSpec] = {
-    # ── Google Gemini ──
+    # ── Google Gemini (AI Studio native slugs — no provider prefix) ──
+    "gemini-2.5-flash": ModelSpec(
+        slug="gemini-2.5-flash",
+        family="gemini",
+        context_window=1_000_000,
+        price_in_per_mtok_usd=0.075,
+        price_out_per_mtok_usd=0.30,
+    ),
+    "gemini-2.5-pro": ModelSpec(
+        slug="gemini-2.5-pro",
+        family="gemini",
+        context_window=2_000_000,
+        price_in_per_mtok_usd=1.25,
+        price_out_per_mtok_usd=5.0,
+    ),
+    "gemini-2.0-flash": ModelSpec(
+        slug="gemini-2.0-flash",
+        family="gemini",
+        context_window=1_000_000,
+        price_in_per_mtok_usd=0.075,
+        price_out_per_mtok_usd=0.30,
+    ),
+    # ── OpenRouter-flavored slugs ──
     "google/gemini-2.5-flash": ModelSpec(
         slug="google/gemini-2.5-flash",
         family="gemini",
         context_window=1_000_000,
         price_in_per_mtok_usd=0.075,
         price_out_per_mtok_usd=0.30,
-    ),
-    "google/gemini-2.5-flash-pro": ModelSpec(
-        slug="google/gemini-2.5-flash-pro",
-        family="gemini",
-        context_window=2_000_000,
-        price_in_per_mtok_usd=1.25,
-        price_out_per_mtok_usd=5.0,
     ),
     # ── Meta Llama ──
     "meta-llama/llama-3.3-70b-instruct": ModelSpec(

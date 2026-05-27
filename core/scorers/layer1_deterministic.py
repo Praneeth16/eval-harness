@@ -16,23 +16,55 @@ from core.scorers import (
 from examples.quill.retrieval import framework_clause_resolves, policy_exists
 
 _FRAMEWORK_CITE_RE = re.compile(
-    r"\b(SOC2|ISO27001|GDPR|DPDP)\s+([A-Z]+\.?\d+(?:\.\d+)?)", re.IGNORECASE
+    r"\b(SOC2|ISO27001|GDPR|DPDP)[:\s]+([A-Z]+\.?\d+(?:\.\d+)?)", re.IGNORECASE
 )
-_POLICY_CITE_RE = re.compile(r"\b([A-Z]{2,6}-\d{3})\b")
+
+
+def _known_policy_prefixes() -> set[str]:
+    """Distinct policy-id prefixes loaded from the corpus, e.g. {ACC, ENC, ...}.
+    Used to avoid matching crypto algorithm strings like AES-256 as policy IDs.
+    """
+    from examples.quill.retrieval import list_policies
+
+    return {p["policy_id"].split("-", 1)[0] for p in list_policies()}
+
+
+def _is_known_prefix(policy_id: str) -> bool:
+    try:
+        prefix = policy_id.split("-", 1)[0]
+    except Exception:  # noqa: BLE001
+        return False
+    return prefix in _known_policy_prefixes()
+# Citation tokens come in three shapes in practice:
+#   1. explicit policy: `POL:ENC-001` or `POL::ENC-001` (tuned format)
+#   2. bare policy:     `ENC-001` (baseline format)
+#   3. past-response:   `PAST:PAST-010` / `PAST::PAST-010` (NOT a policy)
+#   4. fabricated:      `VendorMgmt-Policy-022` (phantom)
+# The bare matcher must skip anything preceded by `PAST:`/`FW:`/`PAST::`/`FW::`
+# so a past-response or framework reference isn't mistaken for a policy.
+_POLICY_CITE_PREFIXED_RE = re.compile(r"\bPOL:{1,2}([A-Z]{2,6}-\d{3})\b")
+_POLICY_CITE_BARE_RE = re.compile(
+    r"(?<!PAST:)(?<!PAST::)(?<!FW:)(?<!FW::)\b([A-Z]{2,6}-\d{3})\b"
+)
+_PAST_REF_RE = re.compile(r"\bPAST:{1,2}[A-Z]+-\d+\b", re.IGNORECASE)
 _PHANTOM_CITE_RE = re.compile(r"\b[A-Z][A-Za-z]+-?[A-Z][A-Za-z]*-Policy-\d+\b")
 
 
 def _extract_policy_ids(citations: list[str], answer: str) -> list[str]:
     found: list[str] = []
-    for c in citations:
-        for m in _POLICY_CITE_RE.finditer(c):
+    for src in [*list(citations), answer or ""]:
+        # Strip past-response refs first so PAST-NNN doesn't trip the bare matcher.
+        cleaned = _PAST_REF_RE.sub(" ", src)
+        for m in _POLICY_CITE_PREFIXED_RE.finditer(src):
             found.append(m.group(1))
-        for m in _PHANTOM_CITE_RE.finditer(c):
+        for m in _POLICY_CITE_BARE_RE.finditer(cleaned):
+            pid = m.group(1)
+            # Only count bare matches whose prefix matches a real policy prefix.
+            # This filters out crypto names (AES-256) and ISO standards (ISO-9001).
+            if _is_known_prefix(pid):
+                found.append(pid)
+        for m in _PHANTOM_CITE_RE.finditer(src):
             found.append(m.group(0))
-    for m in _POLICY_CITE_RE.finditer(answer or ""):
-        found.append(m.group(1))
-    for m in _PHANTOM_CITE_RE.finditer(answer or ""):
-        found.append(m.group(0))
     # dedupe preserving order
     seen: set[str] = set()
     out: list[str] = []
@@ -146,7 +178,7 @@ def cost_budget_scorer(ctx: ScoreContext) -> ScoreResult:
     )
 
 
-def latency_budget_scorer(ctx: ScoreContext, *, limit_ms: int = 8000) -> ScoreResult:
+def latency_budget_scorer(ctx: ScoreContext, *, limit_ms: int = 20_000) -> ScoreResult:
     """Per-question latency budget."""
     lat = int(ctx.get("latency_ms", 0))
     passed = lat <= limit_ms

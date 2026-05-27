@@ -78,9 +78,21 @@ def _named_span(
     attributes: dict[str, Any] | None = None,
 ) -> Iterator[Any]:
     init_mlflow()
+    # MLflow 3.x dropped `inputs` from `start_span` — fold caller-supplied
+    # inputs into attributes so existing call sites keep working.
+    attrs = dict(attributes or {})
+    if inputs:
+        attrs.setdefault("inputs", inputs)
     with mlflow.start_span(
-        name=name, span_type=str(span_type), inputs=inputs, attributes=attributes
+        name=name, span_type=str(span_type), attributes=attrs
     ) as span:
+        if inputs:
+            set_inputs = getattr(span, "set_inputs", None)
+            if callable(set_inputs):
+                try:
+                    set_inputs(inputs)
+                except Exception:  # noqa: BLE001
+                    pass
         yield span
 
 

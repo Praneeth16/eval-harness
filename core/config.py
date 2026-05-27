@@ -19,6 +19,19 @@ class Settings(BaseSettings):
     )
 
     # ── LLM gateway ──
+    # `gemini` uses Google AI Studio's OpenAI-compatible endpoint;
+    # `openrouter` uses OpenRouter. Both pass through the same OpenAI SDK
+    # client — only base_url, auth header, and model slugs differ.
+    llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")
+
+    # Google AI Studio (default)
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta/openai/",
+        alias="GEMINI_BASE_URL",
+    )
+
+    # OpenRouter (fallback / multi-model portability)
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1",
@@ -29,14 +42,17 @@ class Settings(BaseSettings):
         default="http://localhost:3000", alias="OPENROUTER_REFERER"
     )
 
-    default_model: str = Field(default="google/gemini-flash-latest", alias="DEFAULT_MODEL")
-    judge_model: str = Field(default="google/gemini-flash-latest", alias="JUDGE_MODEL")
+    default_model: str = Field(default="gemini-2.5-flash", alias="DEFAULT_MODEL")
+    judge_model: str = Field(default="gemini-2.5-flash", alias="JUDGE_MODEL")
+    # Portability set spans providers — gemini for primary, OpenRouter for
+    # cross-family. Anything OpenRouter-prefixed routes through OR even
+    # when `LLM_PROVIDER=gemini`.
     portability_models: str = Field(
         default=(
-            "google/gemini-flash-latest,"
-            "meta-llama/llama-3.3-70b-instruct,"
-            "anthropic/claude-sonnet-4-6,"
-            "qwen/qwen-2.5-72b-instruct"
+            "gemini-2.5-flash,"
+            "gemini-2.5-pro,"
+            "openrouter:meta-llama/llama-3.3-70b-instruct,"
+            "openrouter:anthropic/claude-sonnet-4-6"
         ),
         alias="PORTABILITY_MODELS",
     )
@@ -46,6 +62,9 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(default=60.0, alias="LLM_TIMEOUT_S")
     llm_max_retries: int = Field(default=4, alias="LLM_MAX_RETRIES")
     llm_retry_backoff_base_s: float = Field(default=1.0, alias="LLM_RETRY_BACKOFF_BASE_S")
+    # Gemini 2.5 series enable thinking by default → ~20s latency per call.
+    # `none` disables it (default for prebake speed); `low|medium|high` keeps it.
+    llm_reasoning_effort: str = Field(default="none", alias="LLM_REASONING_EFFORT")
 
     # ── MLflow ──
     mlflow_tracking_uri: str = Field(
@@ -85,7 +104,7 @@ class Settings(BaseSettings):
         default=20, alias="GEPA_REFLECTION_SAMPLE_SIZE"
     )
     gepa_pareto_objectives: str = Field(
-        default="correctness,groundedness,safety,cost,latency",
+        default="correctness,relevance,execution,safety,cost,latency",
         alias="GEPA_PARETO_OBJECTIVES",
     )
 

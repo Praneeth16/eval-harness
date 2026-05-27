@@ -137,7 +137,12 @@ def prebake(mode: str = "full") -> None:
         seed_demo()
         return
 
-    if not settings.openrouter_api_key:
+    provider = settings.llm_provider.lower()
+    if provider == "gemini" and not settings.gemini_api_key:
+        raise SystemExit(
+            "GEMINI_API_KEY not set — drop it into .env or use --mode seed."
+        )
+    if provider == "openrouter" and not settings.openrouter_api_key:
         raise SystemExit(
             "OPENROUTER_API_KEY not set — drop it into .env or use --mode seed."
         )

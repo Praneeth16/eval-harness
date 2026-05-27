@@ -88,11 +88,17 @@ def _llm_json(prompt: str, *, model: str | None = None) -> tuple[dict, LLMRespon
         return {}, resp
 
 
-def _accumulate(state: QuillState, resp: LLMResponse) -> None:
-    state["total_cost_usd"] = state.get("total_cost_usd", 0.0) + resp.usage.cost_usd
-    state["total_latency_ms"] = (
-        state.get("total_latency_ms", 0) + resp.usage.latency_ms
-    )
+def _accumulate(state: QuillState, resp: LLMResponse) -> dict:
+    """Return the incremented cost/latency for inclusion in the node's return.
+
+    LangGraph merges returned dicts into state but does NOT preserve direct
+    mutations — so each LLM-calling node must thread these counters via its
+    own return value.
+    """
+    return {
+        "total_cost_usd": state.get("total_cost_usd", 0.0) + resp.usage.cost_usd,
+        "total_latency_ms": state.get("total_latency_ms", 0) + resp.usage.latency_ms,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -116,11 +122,10 @@ def classifier_node(state: QuillState) -> QuillState:
     template = prompts.get("classifier", bp.CLASSIFIER_PROMPT)
     prompt = template.format(question=state["parsed_question"])
     obj, resp = _llm_json(prompt, model=state.get("model"))
-    _accumulate(state, resp)
     category = obj.get("category", "security")
     conf = float(obj.get("confidence", 0.5))
     add_attributes({"category": category, "confidence": conf})
-    return {"category": category, "classification_confidence": conf}
+    return {"category": category, "classification_confidence": conf, **_accumulate(state, resp)}
 
 
 @trace(span_type=SpanType.RETRIEVER, name="rag")
@@ -164,7 +169,7 @@ def drafter_node(state: QuillState) -> QuillState:
         context=_format_context(state.get("retrieved", [])),
     )
     obj, resp = _llm_json(prompt, model=state.get("model"))
-    _accumulate(state, resp)
+    drafter_acc = _accumulate(state, resp)
 
     answer = (obj.get("answer") or "").strip()
     citations = obj.get("citations") or []
@@ -178,8 +183,37 @@ def drafter_node(state: QuillState) -> QuillState:
     tool_invocations: list[dict] = list(state.get("tool_invocations") or [])
     if use_verification:
         for cite in citations:
-            # crude split: "SOC2 CC6.1" -> framework, clause; else policy id
-            parts = cite.replace(",", " ").split()
+            # Normalize the citation: strip POL: / FW: prefixes (single or
+            # double colon — both formats appear in the wild).
+            raw = cite.strip()
+            if raw.upper().startswith(("FW:", "FW::")):
+                body = re.split(r":+", raw, 1)[1]
+                parts = re.split(r"[\s:]+", body)
+                parts = [p for p in parts if p]
+                if len(parts) >= 2:
+                    framework, clause_id = parts[0], parts[1]
+                    ok = call_framework_clause_check(framework, clause_id)
+                    tool_invocations.append(
+                        {
+                            "tool": "framework_clause_check",
+                            "args": {"framework": framework, "clause_id": clause_id},
+                            "result": ok,
+                        }
+                    )
+                continue
+            if raw.upper().startswith(("POL:", "POL::")):
+                pid = re.split(r":+", raw, 1)[1].strip()
+                ok = call_policy_exists_check(pid)
+                tool_invocations.append(
+                    {
+                        "tool": "policy_exists_check",
+                        "args": {"policy_id": pid},
+                        "result": ok,
+                    }
+                )
+                continue
+            # Bare token: framework if matches `XXX <clause>`, else policy.
+            parts = raw.replace(",", " ").split()
             if len(parts) >= 2 and parts[0].isalpha() and parts[0].isupper():
                 framework, clause_id = parts[0], parts[1]
                 ok = call_framework_clause_check(framework, clause_id)
@@ -191,11 +225,11 @@ def drafter_node(state: QuillState) -> QuillState:
                     }
                 )
             else:
-                ok = call_policy_exists_check(cite)
+                ok = call_policy_exists_check(raw)
                 tool_invocations.append(
                     {
                         "tool": "policy_exists_check",
-                        "args": {"policy_id": cite},
+                        "args": {"policy_id": raw},
                         "result": ok,
                     }
                 )
@@ -212,6 +246,7 @@ def drafter_node(state: QuillState) -> QuillState:
         "answer": answer,
         "citations": citations,
         "tool_invocations": tool_invocations,
+        **drafter_acc,
     }
 
 
@@ -225,11 +260,10 @@ def gap_detector_node(state: QuillState) -> QuillState:
         citations=", ".join(state.get("citations") or []) or "(none)",
     )
     obj, resp = _llm_json(prompt, model=state.get("model"))
-    _accumulate(state, resp)
     is_gap = bool(obj.get("is_gap", False))
     reason = obj.get("reason", "")
     add_attributes({"gap_detected": is_gap})
-    return {"gap_detected": is_gap, "gap_reason": reason}
+    return {"gap_detected": is_gap, "gap_reason": reason, **_accumulate(state, resp)}
 
 
 @trace(span_type=SpanType.CHAIN, name="risk_tierer")
@@ -242,11 +276,10 @@ def risk_tierer_node(state: QuillState) -> QuillState:
         category=state.get("category", "security"),
     )
     obj, resp = _llm_json(prompt, model=state.get("model"))
-    _accumulate(state, resp)
     tier = obj.get("tier", "medium")
     reason = obj.get("reason", "")
     add_attributes({"risk_tier": tier})
-    return {"risk_tier": tier, "risk_reason": reason}
+    return {"risk_tier": tier, "risk_reason": reason, **_accumulate(state, resp)}
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -23,11 +23,18 @@ def policy_exists_called_before_cite(ctx: ScoreContext) -> ScoreResult:
 
     import re
 
+    from core.scorers.layer1_deterministic import _is_known_prefix
+
     pol_pat = re.compile(r"\b([A-Z]{2,6}-\d{3})\b")
+    past_strip = re.compile(r"\bPAST:{1,2}[A-Z]+-\d+\b", re.IGNORECASE)
     phantom_pat = re.compile(r"\b[A-Z][A-Za-z]+-?[A-Z][A-Za-z]*-Policy-\d+\b")
     cited: set[str] = set()
     for c in [*list(citations), answer]:
-        cited.update(m.group(1) for m in pol_pat.finditer(c))
+        cleaned = past_strip.sub(" ", c)
+        for m in pol_pat.finditer(cleaned):
+            pid = m.group(1)
+            if _is_known_prefix(pid):
+                cited.add(pid)
         cited.update(m.group(0) for m in phantom_pat.finditer(c))
 
     if not cited:
