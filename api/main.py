@@ -365,7 +365,8 @@ def get_portability(opt_id: str) -> PortabilityOut:
         r = s.get(OptRun, opt_id)
         if r is None:
             raise HTTPException(404, "opt run not found")
-    path = REPO_ROOT / "examples" / r.example / "prebaked" / "portability.json"
+        example = r.example
+    path = REPO_ROOT / "examples" / example / "prebaked" / "portability.json"
     rows: list[dict] = []
     if path.exists():
         try:
