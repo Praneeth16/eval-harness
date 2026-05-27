@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "metric": "Citation correctness",
+      "baseline": "0.58",
+      "tuned": "0.91",
+      "holdout": "0.84"
+    },
+    {
+      "metric": "Hallucinated commitment rate",
+      "baseline": "14%",
+      "tuned": "3%",
+      "holdout": "5%"
+    },
+    {
+      "metric": "Reviewer-accept (judge)",
+      "baseline": "0.43",
+      "tuned": "0.78",
+      "holdout": "0.69"
+    },
+    {
+      "metric": "Avg cost / question",
+      "baseline": "$0.021",
+      "tuned": "$0.011",
+      "holdout": "$0.012"
+    },
+    {
+      "metric": "Avg time / questionnaire",
+      "baseline": "47 min",
+      "tuned": "18 min",
+      "holdout": "22 min"
+    }
+  ]
+}

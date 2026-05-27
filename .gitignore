@@ -11,8 +11,8 @@ mlflow-artifacts/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
-indices/
-prebaked/
+# .data/prebaked/ + .data/indices/ are already covered by .data/ above;
+# examples/quill/prebaked/ is intentionally committed for the offline demo.
 
 # ── Python ──────────────────────────────────────────────────────────────────
 __pycache__/
@@ -26,7 +26,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Python `lib/` build output is already covered by `.venv/`; the unanchored
+# pattern conflicted with ui/lib/.
 lib64/
 parts/
 sdist/
