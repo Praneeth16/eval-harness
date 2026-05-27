@@ -91,8 +91,10 @@ classifier) and Safety (vs prompt injection):
 | **S**afety | Prompt injection in attacker-supplied questions, PII leak, fabricated CVE / cert claim |
 | **Cost** | Per-question, per-questionnaire, per-optimization budgets |
 
-200 questions × 7 axes = **1,400 evaluation surfaces per run**. Densest
-showcase any agent harness can offer in 45 min.
+Across the demo, 50 questions × 13 scorers ≈ **650 evaluation surfaces per
+run**. The point isn't the count — it's that every surface persists,
+every surface is comparable across runs, and every surface gates the
+optimizer's Pareto selection.
 
 ## 6. The Self-Evolving Loop
 
@@ -185,11 +187,13 @@ Build four layers in front of the audience:
 - `cost_per_question < $X`
 - Cheap. Run in milliseconds. Catch the loud failures.
 
-**Layer 2 — Semantic (Ragas).**
+**Layer 2 — Semantic (LLM judge).**
 - `groundedness(answer, retrieved_chunks)` — strict chunk-level grounding
-- `faithfulness(answer, gold_response)` — calibrated LLM judge
-- Show judge calibration: precision/recall of judge against 50 human-labeled
-  cases. Pre-empt skeptic.
+- `judge_accept(answer, gold)` — three-tier verdict (accept / revise / reject)
+- Same OpenRouter gateway as the agent; same retry + cost-tracking path.
+- We use the judge for accept/not-accept; the deterministic layer catches
+  the constraints. We don't claim sub-point precision and we don't pretend
+  the judge is ground truth.
 
 **Layer 3 — Trajectory-aware (the frontier).**
 - `policy_exists_called_before_cite(trace)` — was the verification tool

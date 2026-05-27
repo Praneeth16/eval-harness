@@ -160,93 +160,190 @@ def _format_context(retrieved: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _verify_one(raw: str) -> dict:
+    """Run the appropriate verification tool for a citation token.
+
+    Returns a tool_invocations entry — `{tool, args, result, raw}` — for
+    the trajectory scorer + UI to read.
+    """
+    raw = raw.strip()
+    if raw.upper().startswith(("FW:", "FW::")):
+        body = re.split(r":+", raw, 1)[1]
+        parts = [p for p in re.split(r"[\s:]+", body) if p]
+        if len(parts) >= 2:
+            framework, clause_id = parts[0], parts[1]
+            ok = call_framework_clause_check(framework, clause_id)
+            return {
+                "tool": "framework_clause_check",
+                "args": {"framework": framework, "clause_id": clause_id},
+                "result": ok,
+                "raw": raw,
+            }
+    if raw.upper().startswith(("POL:", "POL::")):
+        pid = re.split(r":+", raw, 1)[1].strip()
+        ok = call_policy_exists_check(pid)
+        return {
+            "tool": "policy_exists_check",
+            "args": {"policy_id": pid},
+            "result": ok,
+            "raw": raw,
+        }
+    # Bare token — try framework, then policy.
+    parts = raw.replace(",", " ").split()
+    if len(parts) >= 2 and parts[0].isalpha() and parts[0].isupper():
+        framework, clause_id = parts[0], parts[1]
+        ok = call_framework_clause_check(framework, clause_id)
+        return {
+            "tool": "framework_clause_check",
+            "args": {"framework": framework, "clause_id": clause_id},
+            "result": ok,
+            "raw": raw,
+        }
+    ok = call_policy_exists_check(raw)
+    return {
+        "tool": "policy_exists_check",
+        "args": {"policy_id": raw},
+        "result": ok,
+        "raw": raw,
+    }
+
+
 @trace(span_type=SpanType.AGENT, name="drafter")
 def drafter_node(state: QuillState) -> QuillState:
-    prompts = state.get("prompts") or {}
-    template = prompts.get("drafter", bp.DRAFTER_PROMPT)
-    prompt = template.format(
-        question=state["parsed_question"],
-        context=_format_context(state.get("retrieved", [])),
-    )
-    obj, resp = _llm_json(prompt, model=state.get("model"))
-    drafter_acc = _accumulate(state, resp)
+    """Drafter has two paths.
 
-    answer = (obj.get("answer") or "").strip()
-    citations = obj.get("citations") or []
+    Baseline path (no `use_verification_tools` flag): single LLM call that
+    produces answer + citations in one shot. No verification — citations
+    can be hallucinated. This is what the cold-open trace captures.
+
+    Tuned path (verification enabled): three phases run BEFORE the final
+    answer is written:
+
+      1. **propose** — LLM proposes candidate citation IDs ONLY (no answer
+         text). Lower token budget. Output: list of candidate refs.
+      2. **verify** — for each candidate, the appropriate tool fires.
+         Verified refs are kept; missing refs are dropped.
+      3. **final** — LLM is re-prompted with the question + retrieved
+         context + verified refs only. Hard rule: cite ONLY from the
+         verified list. This is what makes the trajectory claim
+         ("policy_exists_check called before cite") TRUE by construction.
+
+    Trajectory scorer reads `tool_invocations` (ordered list) to assert
+    that every cited policy ID has a matching verify span recorded
+    before this node's final LLM call.
+    """
+    prompts = state.get("prompts") or {}
+    use_verification = bool(prompts.get("use_verification_tools", False))
+    tool_invocations: list[dict] = list(state.get("tool_invocations") or [])
+    context = _format_context(state.get("retrieved", []))
+
+    if not use_verification:
+        template = prompts.get("drafter", bp.DRAFTER_PROMPT)
+        prompt = template.format(question=state["parsed_question"], context=context)
+        obj, resp = _llm_json(prompt, model=state.get("model"))
+        acc = _accumulate(state, resp)
+
+        answer = (obj.get("answer") or "").strip()
+        citations = obj.get("citations") or []
+        if isinstance(citations, str):
+            citations = [citations]
+        citations = [str(c).strip() for c in citations if c]
+
+        add_attributes(
+            {
+                "answer_len_words": len(answer.split()),
+                "citation_count": len(citations),
+                "citations": json.dumps(citations),
+                "verification_used": False,
+                "draft_phases": "single",
+            }
+        )
+        return {
+            "answer": answer,
+            "citations": citations,
+            "tool_invocations": tool_invocations,
+            **acc,
+        }
+
+    # ── Tuned path: propose → verify → final ──
+    propose_template = prompts.get(
+        "drafter_propose",
+        # Fallback if a tuned prompts dict was hand-built without a propose key:
+        # use the regular drafter prompt and post-extract citations.
+        prompts.get("drafter", bp.DRAFTER_PROMPT),
+    )
+    propose_prompt = propose_template.format(
+        question=state["parsed_question"],
+        context=context,
+    )
+    propose_obj, propose_resp = _llm_json(propose_prompt, model=state.get("model"))
+    acc_a = _accumulate(state, propose_resp)
+
+    candidates = propose_obj.get("candidates") or propose_obj.get("citations") or []
+    if isinstance(candidates, str):
+        candidates = [candidates]
+    candidates = [str(c).strip() for c in candidates if c]
+
+    # Verify each candidate BEFORE the final draft is written. This is the
+    # ordering claim the trajectory scorer asserts on.
+    verified_entries: list[dict] = []
+    for cand in candidates:
+        entry = _verify_one(cand)
+        tool_invocations.append(entry)
+        if entry.get("result") is True:
+            verified_entries.append(entry)
+
+    verified_refs_block = (
+        "\n".join(f"- {e['raw']}" for e in verified_entries)
+        if verified_entries
+        else "(none — escalate as a policy gap)"
+    )
+
+    final_template = prompts.get(
+        "drafter_final",
+        prompts.get("drafter", bp.DRAFTER_PROMPT),
+    )
+    # Backwards compatibility: if drafter_final isn't in the prompts dict,
+    # fall back to the regular drafter prompt (loses the verified-refs
+    # constraint but still works).
+    if "{verified_refs}" in final_template:
+        final_prompt = final_template.format(
+            question=state["parsed_question"],
+            context=context,
+            verified_refs=verified_refs_block,
+        )
+    else:
+        final_prompt = final_template.format(
+            question=state["parsed_question"],
+            context=f"VERIFIED REFERENCES (cite only these):\n{verified_refs_block}\n\n{context}",
+        )
+    final_obj, final_resp = _llm_json(final_prompt, model=state.get("model"))
+    acc_b = _accumulate(state, final_resp)
+
+    answer = (final_obj.get("answer") or "").strip()
+    citations = final_obj.get("citations") or []
     if isinstance(citations, str):
         citations = [citations]
     citations = [str(c).strip() for c in citations if c]
 
-    # If the tuned prompt instructs the drafter to verify, the GEPA-tuned
-    # variant calls verification tools below — pre-cite. Baseline does not.
-    use_verification = bool(prompts.get("use_verification_tools", False))
-    tool_invocations: list[dict] = list(state.get("tool_invocations") or [])
-    if use_verification:
-        for cite in citations:
-            # Normalize the citation: strip POL: / FW: prefixes (single or
-            # double colon — both formats appear in the wild).
-            raw = cite.strip()
-            if raw.upper().startswith(("FW:", "FW::")):
-                body = re.split(r":+", raw, 1)[1]
-                parts = re.split(r"[\s:]+", body)
-                parts = [p for p in parts if p]
-                if len(parts) >= 2:
-                    framework, clause_id = parts[0], parts[1]
-                    ok = call_framework_clause_check(framework, clause_id)
-                    tool_invocations.append(
-                        {
-                            "tool": "framework_clause_check",
-                            "args": {"framework": framework, "clause_id": clause_id},
-                            "result": ok,
-                        }
-                    )
-                continue
-            if raw.upper().startswith(("POL:", "POL::")):
-                pid = re.split(r":+", raw, 1)[1].strip()
-                ok = call_policy_exists_check(pid)
-                tool_invocations.append(
-                    {
-                        "tool": "policy_exists_check",
-                        "args": {"policy_id": pid},
-                        "result": ok,
-                    }
-                )
-                continue
-            # Bare token: framework if matches `XXX <clause>`, else policy.
-            parts = raw.replace(",", " ").split()
-            if len(parts) >= 2 and parts[0].isalpha() and parts[0].isupper():
-                framework, clause_id = parts[0], parts[1]
-                ok = call_framework_clause_check(framework, clause_id)
-                tool_invocations.append(
-                    {
-                        "tool": "framework_clause_check",
-                        "args": {"framework": framework, "clause_id": clause_id},
-                        "result": ok,
-                    }
-                )
-            else:
-                ok = call_policy_exists_check(raw)
-                tool_invocations.append(
-                    {
-                        "tool": "policy_exists_check",
-                        "args": {"policy_id": raw},
-                        "result": ok,
-                    }
-                )
-
     add_attributes(
         {
             "answer_len_words": len(answer.split()),
+            "candidate_count": len(candidates),
+            "verified_count": len(verified_entries),
             "citation_count": len(citations),
             "citations": json.dumps(citations),
-            "verification_used": use_verification,
+            "verification_used": True,
+            "draft_phases": "propose-verify-final",
         }
     )
+    # Merge cost / latency accumulators across the two LLM calls.
     return {
         "answer": answer,
         "citations": citations,
         "tool_invocations": tool_invocations,
-        **drafter_acc,
+        "total_cost_usd": acc_a["total_cost_usd"] + (acc_b["total_cost_usd"] - state.get("total_cost_usd", 0.0)),
+        "total_latency_ms": acc_a["total_latency_ms"] + (acc_b["total_latency_ms"] - state.get("total_latency_ms", 0)),
     }
 
 

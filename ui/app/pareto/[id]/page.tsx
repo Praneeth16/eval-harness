@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { api, type Pareto } from "@/lib/api";
 import { ParetoChart } from "@/components/ParetoChart";
+import { AxisBars } from "@/components/AxisBars";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,12 @@ export default async function ParetoHero({
                   choreographed motion in the app. It only fires when the
                   agent has visibly learned.
                 </p>
+              </div>
+            )}
+
+            {pareto && (
+              <div className="mt-6">
+                <AxisBars pareto={pareto} />
               </div>
             )}
 

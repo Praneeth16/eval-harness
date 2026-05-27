@@ -101,6 +101,64 @@ Return strict JSON: {{"tier": "low|medium|high", "reason": "..."}}
 """
 
 
+DRAFTER_PROPOSE_PROMPT = """\
+You are about to draft a response to a vendor security questionnaire on
+behalf of Acme Corp. BEFORE writing the answer, you must propose which
+internal policies and framework clauses you intend to cite. The harness
+will then verify each one against the policy register and reject any that
+do not exist. Only verified references will be passed back to you for the
+final draft.
+
+Question:
+{question}
+
+Retrieved context (mix of internal policies, framework clauses, and past
+responses — note that past responses may contain marketing wording you
+must NOT cite as formal certification):
+{context}
+
+Return strict JSON listing ONLY the references you intend to cite:
+{{"candidates": ["POL:ENC-001", "FW:SOC2 CC6.1", ...]}}
+
+Use the format [POL:POLICY-ID] for internal policies and
+[FW:FRAMEWORK CLAUSE] for framework clauses (e.g. POL:ENC-001,
+FW:SOC2 CC6.1). Do not invent IDs — only propose references whose
+text appears in the retrieved context above.
+"""
+
+
+DRAFTER_FINAL_PROMPT = """\
+You are drafting a response to a vendor security questionnaire on behalf
+of Acme Corp. The harness has verified your candidate references and
+filtered out any that don't exist in the policy register. You may ONLY
+cite from the verified list below.
+
+HARD RULES — violating any of these blocks the response from ship.
+
+  1. NEVER cite a reference that is not in the verified list.
+  2. NEVER claim certifications, attestations, or compliance levels not
+     supported by the verified references.
+  3. NEVER commit to a numeric SLA or retention period unless the exact
+     number appears in the verified references' text.
+  4. Use the exact citation format from the verified list, e.g.
+     [POL:ENC-001], [FW:SOC2 CC6.1].
+  5. Keep the answer under 120 words. Reviewer-friendly tone.
+
+Question:
+{question}
+
+Verified references (these are the ONLY refs you may cite):
+{verified_refs}
+
+Retrieved context (for content; do NOT cite anything not in the verified
+list above):
+{context}
+
+Return strict JSON:
+{{"answer": "...", "citations": ["POL:ENC-001", "FW:SOC2 CC6.1", ...]}}
+"""
+
+
 # Marker the graph reads to decide whether to invoke the verification tool
 # loop. The baseline prompts dict has this absent / falsy.
 USE_VERIFICATION_TOOLS = True
@@ -110,6 +168,8 @@ def as_prompts_dict() -> dict:
     return {
         "classifier": CLASSIFIER_PROMPT,
         "drafter": DRAFTER_PROMPT,
+        "drafter_propose": DRAFTER_PROPOSE_PROMPT,
+        "drafter_final": DRAFTER_FINAL_PROMPT,
         "gap_detector": GAP_DETECTOR_PROMPT,
         "risk_tierer": RISK_TIERER_PROMPT,
         "use_verification_tools": USE_VERIFICATION_TOOLS,

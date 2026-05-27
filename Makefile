@@ -24,8 +24,8 @@ init: ## Initialize local data dirs + SQLite store + FAISS index
 	@source $(VENV)/bin/activate && evalh init && evalh build-index --example quill
 
 .PHONY: seed
-seed: init ## Seed the offline demo (Pareto + headline + portability)
-	@source $(VENV)/bin/activate && $(PY) -m scripts.seed_demo_data
+seed: init ## Seed the offline demo (Pareto + headline + portability + cold-open trace pack)
+	@source $(VENV)/bin/activate && $(PY) -m scripts.seed_demo_data && $(PY) -m scripts.seed_cold_open
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { api, type EvalRun, type Trace } from "@/lib/api";
 import { ScoreChip } from "@/components/ScoreChip";
 import { RunBadge } from "@/components/RunBadge";
+import { LiePanel } from "@/components/LiePanel";
 import { fmtCostUSD, fmtMs, fmtPercent, relativeTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -140,6 +141,22 @@ export default async function RunDetailPage({
                     />
                   ))}
                 </div>
+
+                {failed && (
+                  <LiePanel
+                    scores={t.scores}
+                    retrieved={
+                      ((t.output as { retrieved?: unknown[] } | null)?.retrieved as
+                        | Array<{
+                            chunk_id?: string;
+                            kind?: string;
+                            title?: string;
+                            score?: number;
+                          }>
+                        | undefined) ?? []
+                    }
+                  />
+                )}
               </article>
             );
           })}

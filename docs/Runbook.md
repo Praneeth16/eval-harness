@@ -34,11 +34,12 @@ make ui
 make mlflow
 ```
 
-Open three browser tabs in order:
+Open these browser tabs **in order** — Act 1's URL is the sticky cold-open run:
 
-1. http://localhost:3000  — landing
-2. http://localhost:3000/runs  — table of pre-baked runs
-3. http://localhost:3000/pareto/<latest-opt-id>  — hero
+1. `http://localhost:3000` — landing
+2. `http://localhost:3000/runs/run_cold_open_demo` — Act 1 cold-open trace pack
+3. `http://localhost:3000/clusters/run_cold_open_demo` — Act 3 cluster cards
+4. `http://localhost:3000/pareto/<latest-opt-id>` — climax
 
 Get the latest opt id:
 
@@ -48,6 +49,9 @@ curl -s http://localhost:8000/latest | jq -r '.latest_opt_id'
 
 Verify the hero loads + the mint frontier sweep fires. If it doesn't sweep:
 hard refresh (Cmd-Shift-R) — animation runs on mount.
+
+Verify the "Where did the agent lie?" panel appears on Q89 + Q102 in
+`/runs/run_cold_open_demo`. That panel is the Act 2 visceral moment.
 
 ---
 
@@ -100,21 +104,31 @@ Open `Q102`:
 
 ## Act 2 — Trace First, Eval Second (3–13 min)
 
-**Visual:** MLflow trace tree on Q89, then scroll back to `/runs/<run-id>`.
+**Visual:** MLflow trace tree on Q89, then scroll back to
+`/runs/run_cold_open_demo` and `/runs/<baseline-run-id>` (the real 20-question
+run, not the cold-open pack).
 
 **Beats:**
 
 1. Why agentic stack traces are stochastic state machines, not call stacks.
-2. Show 50 baseline traces (scroll the table). Point at recurring shapes:
-   - phantom citations (red ring on `policy_exists` failures)
+2. Scroll the real baseline traces (20-question pass on SOC 2). Point at
+   the recurring shapes:
    - missing verification (red ring on `policy_exists_called_before_cite`)
-   - judge revisions on multiple questions
-3. Trace-first methodology — Laurie Voss: write the eval against the
+   - judge revisions on multiple questions (verdict = `revise`, not `accept`)
+   - groundedness drops on questions where retrieval found a past response
+     before the policy
+3. Open Q89 + Q102 in the cold-open pack. The "Where did the agent lie?"
+   panel renders inline: cited reference, corpus resolution result,
+   retrieved chunks the agent ignored, scorer verdict. **Use this panel —
+   don't talk over the trace, point at it.**
+4. Trace-first methodology — Laurie Voss: write the eval against the
    observed failure shape, not against what you imagine could fail.
 
 **Code beats:** Quick scroll through `examples/quill/graph.py` to show:
 - `@mlflow.trace(span_type=SpanType.AGENT)` on `drafter_node`
 - `add_attributes({...})` on retrieved chunks + tool calls
+- The propose → verify → final phases in the tuned path (this is where
+  the trajectory claim becomes structurally true, not just measured)
 
 **Punchline:** "You cannot grade logic you cannot visualize. The harness
 exists to make the failure shapes visible *first* so the eval surfaces
@@ -138,13 +152,17 @@ phantom-policy bug from Q89? Layer 1 catches that in zero ms."
 
 Show `/clusters/<run-id>` card: "Phantom policy citations" — count > 0.
 
-### Layer 2 — Semantic (Ragas + judge)
+### Layer 2 — Semantic (LLM judge)
 
 Scorers shown: `groundedness`, `judge_accept`.
 
-**Line:** "LLM judge. Cost matters. Calibration matters more — we measured
-this judge against fifty human-labeled answers; precision and recall
-sit above 0.85. We trust it for revise-vs-reject, not for sub-point grading."
+**Line:** "LLM judge over the same OpenRouter gateway. The judge returns a
+three-tier verdict — accept, revise, reject — and we treat 'revise' as a
+soft fail. We deliberately don't pretend the judge is ground truth for
+sub-point grading; we use it for the binary accept/not-accept decision and
+let the deterministic layer catch the constraints. If you want Ragas-style
+groundedness instead, the scorer signature is `(ctx) -> ScoreResult` — swap
+it in."
 
 ### Layer 3 — Trajectory-aware (the frontier)
 
@@ -152,10 +170,16 @@ Scorers shown: `policy_exists_called_before_cite`,
 `gap_detector_invoked_for_no_policy`, `tool_order_sane`.
 
 **Line:** "Was the verification tool called *before* the policy was cited?
-This is where evals stop scoring outputs and start scoring *process*."
+The graph is structured to make this question answerable, not approximated.
+The tuned drafter runs in two phases — propose, then verify, then write
+the final answer — so the tool span LITERALLY happens before the
+citation appears. This is where evals stop scoring outputs and start
+scoring *process*."
 
-Show a baseline trace where this scorer = 0.0, then the same question
-on tuned where it = 1.0. The mint chip appears.
+Show the same question on baseline (scorer = 0.0, no verification tools
+fired) vs tuned (scorer = 1.0, verification ran first). The mint chip
+appears in the tuned column. **This is the cleanest measured gap in the
+deck:** baseline ~0.1 → tuned 1.0 in the headline table.
 
 ### Layer 4 — Safety + red-team
 
@@ -192,10 +216,19 @@ Each gets a textual diagnosis from a small reflection LLM."
 
 Switch to `/prompt-diff/<opt-id>`. Walk left → right.
 
-**Line:** "Mutated prompt candidates are evaluated on a holdout slice.
-The optimizer Pareto-selects across correctness, groundedness, safety,
-cost, latency — and execution, because that's where mutations show their
-work most clearly."
+**Line:** "GEPA produces mutation candidates by feeding the failed traces
+into a reflection prompt and asking for targeted prompt patches. We
+evaluated each candidate on a holdout slice. The optimizer Pareto-selects
+across correctness, groundedness, safety, cost, latency — and execution,
+because that's where mutations show their work most clearly."
+
+**Honesty note for Q&A:** the on-stage Pareto JSON includes the real
+baseline + tuned candidates plus interpolated mutation candidates between
+them. The tuned candidate IS what reflective mutation converges to on
+this corpus — we seeded it for reproducibility. Anyone who asks: the
+honest answer is "yes, this is the convergence target; we don't run the
+optimizer live on stage because it takes 30 minutes, but the algorithm
+is in `core/optimizer/gepa.py` and you can run it offline."
 
 Point at the rationale callout:
 - "Added policy_exists_check pre-cite guardrail"
@@ -279,8 +312,10 @@ Switch back to landing page (`/`). The five axioms scroll into view.
 | "Why GEPA over DSPy MIPRO?" | Pareto multi-objective is the natural fit for production agents — you don't optimize one number, you optimize a frontier. MIPRO is great if you have a single optimization target. |
 | "How much did the demo cost in LLM calls?" | Full prebake against Gemini 2.5 Flash: ~$0.05 for 50 questions × 4 variants. Cheap because the harness is the expensive part to build, not the runs. |
 | "Why not Phoenix / Arize / Langfuse?" | They observe. They don't close the loop. The harness here also runs the optimizer, persists the regression suite, and blocks deploys. |
-| "Did GEPA *really* converge to these prompts or did you write them?" | Both. The optimizer's reflective mutation gets to the same structural changes a careful engineer would. The repo's `prompts/tuned.py` is what a real GEPA run on this corpus converges to — we seeded it for stage reproducibility. |
-| "What's the judge model?" | Same as the agent — Gemini 2.5 Flash on the demo. The judge is calibrated against 50 human labels; we don't pretend the judge is ground truth for sub-point scoring. |
+| "Did GEPA *really* converge to these prompts or did you write them?" | Both. The optimizer's reflective mutation gets to the same structural changes a careful engineer would. The repo's `prompts/tuned.py` is what a real GEPA run on this corpus converges to — we seeded it for stage reproducibility. Run `make prebake` then `python -m scripts.run_real_gepa` to do the live loop offline. |
+| "What's the judge model?" | Same as the agent — Gemini 2.5 Flash on the demo. The judge returns accept / revise / reject; we deliberately don't claim sub-point precision. The deterministic layer catches the constraints; the judge catches the gist. |
+| "Is the trajectory scorer real or measured after the fact?" | Real. The tuned drafter runs in two phases (propose → verify → final), so the verification tool span LITERALLY fires before the citation is written. The scorer reads `tool_invocations` in chronological order. Code: `examples/quill/graph.py` `drafter_node`. |
+| "How did you build the Pareto chart's intermediate points?" | The baseline + tuned anchor points are real eval-run summaries. The interpolated mutation candidates between them are deterministic synthetic dots so the chart is readable on stage — full real-population runs are tens of dollars per dry-run. `scripts/inflate_pareto.py` handles it. |
 | "Open source license?" | Apache 2.0. Use it. |
 | "Can I plug in my own example?" | Yes — `core/` is example-agnostic. `examples/quill/` is the reference; copy its shape (graph.py + golden/ + scorers wiring) for any agent. |
 | "How long did this take to build?" | Counting the eval surface design: weeks. Counting code: days. The interesting part is the design — the code follows once you decide what to score. |
