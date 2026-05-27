@@ -279,7 +279,14 @@ def drafter_node(state: QuillState) -> QuillState:
     propose_obj, propose_resp = _llm_json(propose_prompt, model=state.get("model"))
     acc_a = _accumulate(state, propose_resp)
 
-    candidates = propose_obj.get("candidates") or propose_obj.get("citations") or []
+    # Defensive: some models return a bare list `[...]` instead of an object
+    # `{"candidates": [...]}` even when prompted for strict JSON. Tolerate both.
+    if isinstance(propose_obj, list):
+        candidates = propose_obj
+    elif isinstance(propose_obj, dict):
+        candidates = propose_obj.get("candidates") or propose_obj.get("citations") or []
+    else:
+        candidates = []
     if isinstance(candidates, str):
         candidates = [candidates]
     candidates = [str(c).strip() for c in candidates if c]
@@ -320,6 +327,8 @@ def drafter_node(state: QuillState) -> QuillState:
     final_obj, final_resp = _llm_json(final_prompt, model=state.get("model"))
     acc_b = _accumulate(state, final_resp)
 
+    if not isinstance(final_obj, dict):
+        final_obj = {}
     answer = (final_obj.get("answer") or "").strip()
     citations = final_obj.get("citations") or []
     if isinstance(citations, str):
