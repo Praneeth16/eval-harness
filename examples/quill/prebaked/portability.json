@@ -29,7 +29,7 @@
       "notes": "holds on the trajectory scorer — ships"
     },
     {
-      "model": "anthropic/claude-sonnet-4-6",
+      "model": "anthropic/claude-sonnet-4.6",
       "family": "claude",
       "scores": {
         "correctness": 0.85,
