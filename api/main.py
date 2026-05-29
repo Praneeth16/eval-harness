@@ -17,6 +17,7 @@ from sqlalchemy import desc, func, select
 
 from api.schemas import (
     ClusterOut,
+    DetectionOut,
     EvalRunOut,
     OptRunOut,
     ParetoOut,
@@ -374,6 +375,26 @@ def get_portability(opt_id: str) -> PortabilityOut:
         except json.JSONDecodeError:
             rows = []
     return PortabilityOut(opt_run_id=opt_id, rows=rows)
+
+
+@app.get("/detection", response_model=DetectionOut)
+def get_detection(example: str = "quill") -> DetectionOut:
+    """Detection-contrast matrix — what each eval layer sees. Read from a
+    sidecar JSON file; numbers come straight from the prebaked artifacts."""
+    path = REPO_ROOT / "examples" / example / "prebaked" / "detection.json"
+    if not path.exists():
+        raise HTTPException(404, "detection artifact not available")
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"detection artifact malformed: {e}") from e
+    return DetectionOut(
+        title=payload.get("title", "What each eval layer sees"),
+        subtitle=payload.get("subtitle", ""),
+        layers=payload.get("layers", []),
+        rows=payload.get("rows", []),
+        footnote=payload.get("footnote", ""),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -88,6 +88,14 @@ class PortabilityOut(BaseModel):
     rows: list[dict]
 
 
+class DetectionOut(BaseModel):
+    title: str
+    subtitle: str = ""
+    layers: list[dict] = []
+    rows: list[dict] = []
+    footnote: str = ""
+
+
 class RunRequest(BaseModel):
     golden: str = "examples/quill/golden/soc2.jsonl"
     model: str | None = None

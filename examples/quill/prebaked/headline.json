@@ -8,7 +8,7 @@
     },
     {
       "metric": "Verified-cite trajectory",
-      "baseline": "0.05",
+      "baseline": "0.10",
       "tuned": "1.00",
       "holdout": "1.00"
     },
@@ -20,9 +20,9 @@
     },
     {
       "metric": "Reviewer-accept (judge)",
-      "baseline": "0.60",
+      "baseline": "0.50",
       "tuned": "0.78",
-      "holdout": "0.53"
+      "holdout": "0.55"
     },
     {
       "metric": "Avg cost / question",
@@ -32,9 +32,9 @@
     },
     {
       "metric": "Avg time / question",
-      "baseline": "6 s",
+      "baseline": "7 s",
       "tuned": "7 s",
-      "holdout": "7 s"
+      "holdout": "8 s"
     }
   ]
 }

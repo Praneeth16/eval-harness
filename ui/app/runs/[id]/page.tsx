@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { api, type EvalRun, type Trace } from "@/lib/api";
+import { api, type Detection, type EvalRun, type Trace } from "@/lib/api";
 import { ScoreChip } from "@/components/ScoreChip";
 import { RunBadge } from "@/components/RunBadge";
 import { LiePanel } from "@/components/LiePanel";
+import { DetectionContrast } from "@/components/DetectionContrast";
 import { fmtCostUSD, fmtMs, fmtPercent, relativeTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,16 @@ export default async function RunDetailPage({
     traces = await api.listTraces(id);
   } catch (e) {
     err = (e as Error).message;
+  }
+
+  const isColdOpen = id === "run_cold_open_demo";
+  let detection: Detection | null = null;
+  if (isColdOpen) {
+    try {
+      detection = await api.getDetection("quill");
+    } catch {
+      detection = null;
+    }
   }
 
   return (
@@ -77,6 +88,25 @@ export default async function RunDetailPage({
                 : undefined
             }
           />
+        </section>
+      )}
+
+      {detection && (
+        <section className="mt-10">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-display text-title">Why the demo never surfaced this</h2>
+            <Link
+              href="/detection"
+              className="text-ui-sm text-ink-muted hover:text-ink-primary"
+            >
+              full contrast →
+            </Link>
+          </div>
+          <p className="text-ink-secondary text-ui mt-1 mb-4 max-w-[70ch]">
+            A vibe check and a string/citation eval both pass these answers. Only the
+            trajectory check sees the lie.
+          </p>
+          <DetectionContrast data={detection} compact />
         </section>
       )}
 

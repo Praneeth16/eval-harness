@@ -132,6 +132,29 @@ export type Portability = {
   rows: PortabilityRow[];
 };
 
+export type DetectionLayer = { key: string; label: string; kind: string };
+
+export type DetectionCell = {
+  verdict: "pass" | "caught" | "block" | "flag" | "na";
+  label: string;
+  note?: string;
+};
+
+export type DetectionRow = {
+  scenario: string;
+  detail?: string;
+  axis?: string;
+  cells: DetectionCell[];
+};
+
+export type Detection = {
+  title: string;
+  subtitle: string;
+  layers: DetectionLayer[];
+  rows: DetectionRow[];
+  footnote: string;
+};
+
 export const api = {
   health: () => getJson<{ status: string }>("/health"),
   latest: () =>
@@ -150,6 +173,8 @@ export const api = {
   getPareto: (id: string) => getJson<Pareto>(`/pareto/${id}`),
   getPromptDiff: (id: string) => getJson<PromptDiff>(`/prompt-diff/${id}`),
   getPortability: (id: string) => getJson<Portability>(`/portability/${id}`),
+  getDetection: (example = "quill") =>
+    getJson<Detection>(`/detection?example=${example}`),
 
   kickoffQuill: (body: {
     golden?: string;
