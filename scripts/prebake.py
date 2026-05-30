@@ -24,13 +24,11 @@ import argparse
 import json
 import logging
 import time
-import uuid
 from pathlib import Path
 
 from core.clusters import cluster_run
 from core.config import REPO_ROOT, settings
 from core.eval import EvalRunSummary, run_eval
-from core.optimizer.gepa import GepaCandidate, run_gepa
 from core.store.db import init_db
 from core.tracing import init_mlflow
 from examples.quill.prompts.tuned import as_prompts_dict as tuned_prompts_dict
@@ -233,38 +231,9 @@ def prebake(mode: str = "full") -> None:
             notes="prebake:tuned:injection",
         )
 
-    # 6. Build a credible Pareto JSON from baseline + tuned summaries.
-    log.info("→ assembling Pareto / OptRun")
-    GepaCandidate(
-        candidate_id="cand_baseline",
-        label="baseline",
-        prompts={},  # baseline = empty prompts dict, defaults applied
-        mutation_rationale="",
-    )
-    tuned_candidate = GepaCandidate(
-        candidate_id=f"cand_tuned_{uuid.uuid4().hex[:6]}",
-        label="tuned",
-        prompts=tuned_prompts,
-        parent_id="cand_baseline",
-        mutation_rationale=(
-            "Added policy_exists_check guardrail, tightened citation format to "
-            "[POL:ID]/[FW:NAME CLAUSE], forbade upgrading marketing wording to "
-            "formal certification claims, fixed gap detector to fire on missing "
-            "policy retrieval."
-        ),
-        summary=tuned_summary,
-    )
-    # `run_gepa` with seeded_winner = tuned candidate skips live mutation
-    # while keeping the real algorithm path (Pareto compute + OptRun persist).
-    gepa_result = run_gepa(
-        baseline_prompts={},
-        source_eval_run_id=baseline_summary.run_id,
-        source_summary=baseline_summary,
-        example="quill",
-        golden_path=golden_soc2,
-        seeded_winner=tuned_candidate,
-    )
-    log.info("opt_run_id = %s", gepa_result.opt_run_id)
+    # 6. (GEPA OptRun + Pareto frontier now come from a *real* dspy.GEPA run —
+    #    see scripts/run_real_gepa.py. prebake only produces the baseline/tuned
+    #    eval rows, headline numbers, and portability table.)
 
     # 7. Headline metrics sidecar.
     headline = _headline_from_summaries(baseline_summary, tuned_summary, holdout_summary)
@@ -319,7 +288,11 @@ def prebake(mode: str = "full") -> None:
 
     elapsed = time.time() - started
     log.info("prebake done in %.1fs", elapsed)
-    print(f"\nOpen:\n  http://localhost:3000/pareto/{gepa_result.opt_run_id}\n")
+    print(
+        "\nBaseline + tuned + portability prebaked.\n"
+        "Next: run the real GEPA optimization to produce the Pareto frontier:\n"
+        "  python -m scripts.run_real_gepa --yes\n"
+    )
 
 
 if __name__ == "__main__":

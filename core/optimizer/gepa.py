@@ -1,25 +1,22 @@
-"""GEPA — reflective prompt mutation + Pareto selection.
+"""GEPA bridge — turn a real ``dspy.GEPA`` run into the harness's artifacts.
 
-Pipeline:
+The optimization itself is run by ``dspy.GEPA`` (reflective prompt evolution
+with instance-level Pareto candidate selection) in ``scripts/run_real_gepa.py``.
+This module's job is the *bridge*: take the ``DspyGEPAResult`` and
 
-    1. Seed candidates: baseline + N reflective mutations of baseline.
-    2. Each candidate evaluated on a sampled slice of the golden set
-       (fitness = per-axis pass rate plus normalized cost / latency).
-    3. Pareto select across objectives `gepa_pareto_objectives`
-       (default: correctness, groundedness, safety, cost, latency).
-    4. Iterate: pull failed traces from current Pareto frontier, ask the
-       judge to propose targeted prompt mutations, evaluate, re-select.
+  1. re-score a bounded set of candidates (baseline seed, the per-instance
+     Pareto frontier, and the winner) on the validation set with the **same**
+     CLEAR-S scorers the rest of the harness uses, producing real 7-axis
+     objectives + measured cost / latency;
+  2. compute the multi-objective Pareto frontier over those 7 axes (the chart
+     on ``/pareto/[id]`` and the deploy gate use all seven, not a scalar);
+  3. persist an ``OptRun`` whose ``pareto_json`` matches the shape the API and
+     UI already render;
+  4. write the winner's evolved instructions to disk.
 
-Outputs `GepaResult` with:
-
-    * `pareto_json`   — JSON the `/pareto/[id]` page renders directly
-    * `baseline_path` / `winner_path` — written prompt files
-    * `iteration_log` — what changed at each step, used by the prompt-diff
-      page and the talk's narration
-
-The algorithm here is deliberately minimal: we want it credible enough that
-the audience trusts the pre-baked artifacts came out of a real loop, but
-the talk runs against frozen artifacts so we never invoke this live.
+The Pareto math (`_dominates`, `pareto_frontier`) is unchanged — it was always
+real; only the candidate *source* changed from a hand-rolled mutation loop to
+genuine GEPA.
 """
 
 from __future__ import annotations
@@ -30,10 +27,13 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from core.config import settings
-from core.eval import EvalRunSummary, run_eval
-from core.scorers import AXIS_C, AXIS_R, AXIS_S
+from core.eval.runner import EvalRunSummary, _aggregate, _axis_pass_rate, _build_context
+from core.llm.models import estimate_cost_usd
+from core.scorers import AXIS_C, AXIS_R, AXIS_S, ScoreResult
+from core.scorers.registry import all_scorers
 from core.store.db import get_session
 from core.store.models import OptRun
 
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class GepaCandidate:
     candidate_id: str
-    label: str  # "baseline" | "mutation-1" | "tuned" | ...
+    label: str  # "baseline" | "candidate-3" | "winner" | ...
     prompts: dict
     objectives: dict[str, float] = field(default_factory=dict)
     parent_id: str | None = None
@@ -64,15 +64,13 @@ class GepaCandidate:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Pareto math
+# Pareto math (unchanged — minimization axes are sign-flipped in
+# `_normalize_objectives` so higher is always better)
 # ─────────────────────────────────────────────────────────────────────────
 
 
 def _dominates(a: dict[str, float], b: dict[str, float], objectives: list[str]) -> bool:
-    """A dominates B iff a >= b on every objective and a > b on at least one.
-    Cost + latency are minimization objectives — handled by sign-flip in
-    `_normalize_objectives` so we can always treat higher as better.
-    """
+    """A dominates B iff a >= b on every objective and a > b on at least one."""
     strictly_better = False
     for k in objectives:
         av = a.get(k, 0.0)
@@ -89,17 +87,19 @@ def pareto_frontier(
 ) -> list[GepaCandidate]:
     frontier: list[GepaCandidate] = []
     for c in candidates:
-        if any(_dominates(o.objectives, c.objectives, objectives) for o in candidates if o is not c):
+        if any(
+            _dominates(o.objectives, c.objectives, objectives)
+            for o in candidates
+            if o is not c
+        ):
             continue
         frontier.append(c)
     return frontier
 
 
 def _normalize_objectives(summary: EvalRunSummary) -> dict[str, float]:
-    """Flip cost / latency so higher = better (so we can use a single
-    domination test)."""
+    """Flip cost / latency so higher = better (single domination test)."""
     axis = summary.per_axis_pass_rate
-    # Per-axis pass rates (0..1) for max-objectives
     out = {
         "correctness": axis.get(AXIS_C, 0.0),
         "relevance": axis.get(AXIS_R, 0.0),
@@ -107,97 +107,209 @@ def _normalize_objectives(summary: EvalRunSummary) -> dict[str, float]:
         "safety": axis.get(AXIS_S, 0.0),
         "adherence": axis.get("adherence", 0.0),
     }
-    # Cost: normalize against the per-eval budget; higher = under budget.
     budget = max(settings.cost_budget_per_eval_usd, 1e-9)
     total_cost = summary.avg_cost_usd * summary.total
     out["cost"] = max(0.0, 1.0 - (total_cost / budget))
-    # Latency: nominal 8s per question budget.
     budget_ms = 8000.0
     out["latency"] = max(0.0, 1.0 - (summary.avg_latency_ms / budget_ms))
     return out
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Reflective mutation
+# DSPy candidate handling
 # ─────────────────────────────────────────────────────────────────────────
 
 
-_MUTATION_PROMPT = """\
-You are GEPA, a reflective prompt mutator. Below is the current prompt set
-for a multi-agent vendor-questionnaire response system, plus a list of
-diagnosed failures from a recent eval run. Propose a TARGETED mutation:
-modify ONE or TWO prompts to fix the highest-impact failure modes without
-regressing on others.
-
-Current prompts (JSON):
-{prompts_json}
-
-Failure diagnoses:
-{diagnoses}
-
-Return strict JSON:
-{{
-  "rationale": "one-sentence summary of the targeted change",
-  "prompt_patches": {{
-    "drafter": "...full replacement string or null...",
-    "classifier": null,
-    "gap_detector": null,
-    "risk_tierer": null
-  }},
-  "use_verification_tools": true|false
-}}
-"""
+def _candidate_instructions(cand: Any) -> dict[str, str]:
+    """Normalize a GEPA candidate (a component_name -> instruction-text mapping,
+    or a Module) into a plain ``{predictor_name: instruction}`` dict."""
+    if isinstance(cand, dict):
+        return {k: str(v) for k, v in cand.items()}
+    # Module: read instructions off its named predictors.
+    out: dict[str, str] = {}
+    for name, pred in cand.named_predictors():
+        out[name] = pred.signature.instructions
+    return out
 
 
-def _build_diagnoses(summary: EvalRunSummary) -> str:
-    parts = []
-    for scorer, mean in sorted(summary.score_aggregates.items(), key=lambda x: x[1]):
-        parts.append(f"  - {scorer}: mean={mean:.2f}")
-    parts.append("Per-axis pass rate:")
-    for axis, rate in sorted(summary.per_axis_pass_rate.items()):
-        parts.append(f"  - {axis}: {rate:.2f}")
-    return "\n".join(parts)
+def program_from_instructions(instructions: dict[str, str]):
+    """Rebuild a ``QuillProgram`` with the given per-predictor instructions."""
+    from examples.quill.dspy_program import QuillProgram
+
+    prog = QuillProgram()
+    for name, pred in prog.named_predictors():
+        if name in instructions:
+            pred.signature = pred.signature.with_instructions(instructions[name])
+    return prog
 
 
-def reflective_mutate(
-    baseline: GepaCandidate, summary: EvalRunSummary
-) -> GepaCandidate:
-    from core.llm.client import get_client
+def _normalized_model_slug(model: str | None) -> str:
+    """Strip litellm provider prefixes so the slug hits the cost registry."""
+    if not model:
+        return settings.default_model
+    for prefix in ("openrouter/", "openai/", "gemini/", "google/"):
+        if model.startswith(prefix) and prefix != "google/":
+            return model[len(prefix):]
+    return model
 
-    client = get_client()
-    prompt = _MUTATION_PROMPT.format(
-        prompts_json=json.dumps(baseline.prompts, indent=2)[:6000],
-        diagnoses=_build_diagnoses(summary),
+
+def rescore_program(
+    program,
+    rows: list[dict],
+    *,
+    model_slug: str | None,
+    include_judges: bool = True,
+    label: str = "candidate",
+) -> EvalRunSummary:
+    """Run a (rebuilt) DSPy program over golden rows with the real CLEAR-S
+    scorers, measuring wall-clock latency and token cost. Returns a summary
+    whose ``per_axis_pass_rate`` feeds ``_normalize_objectives``."""
+
+    scorers = all_scorers(include_judges=include_judges)
+    all_scores: list[ScoreResult] = []
+    per_trace_pass: list[bool] = []
+    total_cost = 0.0
+    total_latency = 0
+    slug = _normalized_model_slug(model_slug)
+
+    for row in rows:
+        t0 = time.perf_counter()
+        try:
+            pred = program(question=row.get("question", ""))
+        except Exception:
+            log.exception("rescore: program failed on %s", row.get("id"))
+            continue
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        cost = 0.0
+        try:
+            usage = pred.get_lm_usage() or {}
+            for _model, u in usage.items():
+                cost += estimate_cost_usd(
+                    slug,
+                    int(u.get("prompt_tokens", 0) or 0),
+                    int(u.get("completion_tokens", 0) or 0),
+                )
+        except Exception:
+            pass
+
+        ctx = _build_context(row, pred)
+        ctx["cost_usd"] = cost
+        ctx["latency_ms"] = latency_ms
+
+        trace_scores: list[ScoreResult] = []
+        for sc in scorers:
+            try:
+                trace_scores.append(sc(ctx))
+            except Exception as e:
+                trace_scores.append(
+                    ScoreResult(
+                        scorer_name=getattr(sc, "__name__", "?"),
+                        clear_axis="correctness",
+                        value=0.0,
+                        passed=False,
+                        details={"error": str(e)},
+                    )
+                )
+        all_scores.extend(trace_scores)
+        per_trace_pass.append(all(s.passed for s in trace_scores))
+        total_cost += cost
+        total_latency += latency_ms
+
+    n = max(len(per_trace_pass), 1)
+    pass_count = sum(1 for p in per_trace_pass if p)
+    return EvalRunSummary(
+        run_id=f"rescore_{label}",
+        example="quill",
+        dataset="gepa-rescore",
+        model=slug,
+        total=len(per_trace_pass),
+        pass_count=pass_count,
+        fail_count=len(per_trace_pass) - pass_count,
+        avg_cost_usd=total_cost / n,
+        avg_latency_ms=total_latency / n,
+        per_axis_pass_rate=_axis_pass_rate(all_scores),
+        score_aggregates=_aggregate(all_scores),
     )
-    resp = client.chat(
-        messages=[{"role": "user", "content": prompt}],
-        model=settings.judge_model,
-        response_format={"type": "json_object"},
-    )
-    try:
-        obj = json.loads(resp.content)
-    except json.JSONDecodeError:
-        obj = {}
 
-    new_prompts = dict(baseline.prompts)
-    patches = obj.get("prompt_patches") or {}
-    for k, v in patches.items():
-        if isinstance(v, str) and v.strip():
-            new_prompts[k] = v
-    if obj.get("use_verification_tools") is not None:
-        new_prompts["use_verification_tools"] = bool(obj["use_verification_tools"])
 
-    return GepaCandidate(
-        candidate_id=f"cand_{uuid.uuid4().hex[:8]}",
-        label="mutation",
-        prompts=new_prompts,
-        parent_id=baseline.candidate_id,
-        mutation_rationale=str(obj.get("rationale", "")),
-    )
+def _select_indices(detailed, max_candidates: int) -> list[int]:
+    """Baseline seed (0), the per-instance Pareto frontier, and the winner —
+    deduped and capped so re-scoring stays affordable."""
+    idxs: list[int] = [0, detailed.best_idx]
+    for s in getattr(detailed, "per_val_instance_best_candidates", []) or []:
+        # Element is a set of tying candidate indices, or a single int.
+        if isinstance(s, int):
+            idxs.append(s)
+        else:
+            idxs.extend(sorted(s))
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for i in idxs:
+        if i not in seen and 0 <= i < len(detailed.candidates):
+            seen.add(i)
+            ordered.append(i)
+    # Keep baseline + winner always; fill the rest up to the cap by val score.
+    must = {0, detailed.best_idx}
+    rest = [i for i in ordered if i not in must]
+    rest.sort(key=lambda i: detailed.val_aggregate_scores[i], reverse=True)
+    keep = list(must) + rest
+    return keep[: max(max_candidates, len(must))]
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Orchestrator
+# Winner prompt serialization (instructions → graph-compatible templates)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def winner_prompts_dict(instructions: dict[str, str]) -> dict:
+    """Map evolved DSPy instructions into the LangGraph ``prompts`` dict so the
+    winner can ship into the existing graph (prompt-diff / portability pages).
+    Keeps the deterministic verify scaffold (``use_verification_tools``)."""
+    from examples.quill.prompts import tuned as tp
+
+    classify_instr = instructions.get("classify", "")
+    draft_instr = instructions.get("draft", "")
+    classifier_tpl = (
+        f"{classify_instr}\n\nQuestion: {{question}}\n\n"
+        'Return strict JSON: {{"category": "...", "confidence": 0.0-1.0}}'
+    )
+    drafter_final_tpl = (
+        f"{draft_instr}\n\nQuestion:\n{{question}}\n\n"
+        "Verified references (cite ONLY these):\n{verified_refs}\n\n"
+        "Retrieved context (for content; do not cite anything outside the "
+        "verified list):\n{context}\n\n"
+        'Return strict JSON: {{"answer": "...", "citations": ["POL:ENC-001", ...]}}'
+    )
+    return {
+        "classifier": classifier_tpl,
+        "drafter_propose": tp.DRAFTER_PROPOSE_PROMPT,
+        "drafter_final": drafter_final_tpl,
+        "gap_detector": tp.GAP_DETECTOR_PROMPT,
+        "risk_tierer": tp.RISK_TIERER_PROMPT,
+        "use_verification_tools": True,
+    }
+
+
+def write_winner_prompts(instructions: dict[str, str], path: str | Path) -> Path:
+    """Persist the winner's evolved instructions as an importable prompts module."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = (
+        '"""GEPA-evolved Quill prompts — written by scripts/run_real_gepa.py.\n\n'
+        "Auto-generated. The CLASSIFY / DRAFT instructions are what GEPA's\n"
+        "reflective mutation converged on, seeded from the broken baseline.\n"
+        '"""\n\n'
+        "from __future__ import annotations\n\n"
+        f"CLASSIFY_INSTRUCTION = {instructions.get('classify', '')!r}\n\n"
+        f"DRAFT_INSTRUCTION = {instructions.get('draft', '')!r}\n"
+    )
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Public bridge
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -211,100 +323,81 @@ class GepaResult:
     iteration_log: list[dict] = field(default_factory=list)
 
 
-def run_gepa(
+def build_opt_run(
     *,
-    baseline_prompts: dict,
+    detailed,
     source_eval_run_id: str,
-    source_summary: EvalRunSummary,
     example: str,
-    golden_path: str | Path,
-    max_iters: int | None = None,
-    sample_size: int | None = None,
+    valset_rows: list[dict],
+    model_slug: str | None,
     objectives: list[str] | None = None,
-    seeded_winner: GepaCandidate | None = None,
+    max_candidates: int = 8,
+    rescore_n: int | None = None,
+    rescore_include_judges: bool = True,
+    winner_prompt_path: str = "examples/quill/prompts/tuned_gepa.py",
+    baseline_prompt_path: str = "examples/quill/prompts/baseline.py",
+    config_extra: dict | None = None,
 ) -> GepaResult:
-    """Run the GEPA loop.
-
-    `seeded_winner` lets prebake skip live mutation and inject the known
-    `tuned.py` prompts as the tuned candidate — keeps the algorithm honest
-    while making outputs deterministic for the demo.
-    """
+    """Turn a ``DspyGEPAResult`` into a persisted ``OptRun`` with a real
+    multi-objective Pareto frontier."""
     objectives = objectives or settings.gepa_objective_list or [
-        "correctness", "relevance", "safety", "cost", "latency"
+        "correctness", "relevance", "execution", "safety", "cost", "latency"
     ]
-    max_iters = max_iters or settings.gepa_max_iters
-    sample_size = sample_size or settings.gepa_reflection_sample_size
+    if "adherence" not in objectives:
+        objectives = [*objectives, "adherence"]
 
+    rows = valset_rows[:rescore_n] if rescore_n else valset_rows
     opt_run_id = f"opt_{uuid.uuid4().hex[:12]}"
     started = time.time()
+
+    keep = _select_indices(detailed, max_candidates)
     log.info(
-        "gepa start: opt_run_id=%s objectives=%s max_iters=%d sample_size=%d",
-        opt_run_id, objectives, max_iters, sample_size,
+        "gepa bridge: opt=%s rescoring %d/%d candidates on %d val rows (judges=%s)",
+        opt_run_id, len(keep), len(detailed.candidates), len(rows), rescore_include_judges,
     )
 
-    baseline = GepaCandidate(
-        candidate_id="cand_baseline",
-        label="baseline",
-        prompts=dict(baseline_prompts),
-        objectives=_normalize_objectives(source_summary),
-        summary=source_summary,
-    )
-
-    candidates: list[GepaCandidate] = [baseline]
-    iteration_log: list[dict] = [
-        {"iter": 0, "added": [baseline.candidate_id], "objectives": baseline.objectives}
-    ]
-
-    def _evaluate(cand: GepaCandidate) -> None:
-        summary = run_eval(
-            example=example,
-            golden_path=golden_path,
-            prompts=cand.prompts,
-            include_judges=True,
-            notes=f"gepa:{opt_run_id}:{cand.candidate_id}",
+    candidates: list[GepaCandidate] = []
+    by_index: dict[int, GepaCandidate] = {}
+    iteration_log: list[dict] = []
+    for idx in keep:
+        instructions = _candidate_instructions(detailed.candidates[idx])
+        prog = program_from_instructions(instructions)
+        summary = rescore_program(
+            prog,
+            rows,
+            model_slug=model_slug,
+            include_judges=rescore_include_judges,
+            label=str(idx),
         )
-        cand.summary = summary
-        cand.objectives = _normalize_objectives(summary)
-
-    if seeded_winner is not None:
-        if seeded_winner.summary is not None and not seeded_winner.objectives:
-            seeded_winner.objectives = _normalize_objectives(seeded_winner.summary)
-        candidates.append(seeded_winner)
+        label = "baseline" if idx == 0 else f"candidate-{idx}"
+        parents = detailed.parents[idx] if idx < len(detailed.parents) else None
+        parent_idx = next((p for p in (parents or []) if p is not None), None)
+        cand = GepaCandidate(
+            candidate_id=f"cand_{idx:03d}",
+            label=label,
+            prompts=instructions,
+            objectives=_normalize_objectives(summary),
+            parent_id=(f"cand_{parent_idx:03d}" if parent_idx is not None else None),
+            mutation_rationale=(
+                f"GEPA candidate #{idx} · val_agg={detailed.val_aggregate_scores[idx]:.3f} · "
+                f"discovered at {detailed.discovery_eval_counts[idx]} metric calls"
+            ),
+            summary=summary,
+        )
+        candidates.append(cand)
+        by_index[idx] = cand
         iteration_log.append(
             {
-                "iter": 1,
-                "added": [seeded_winner.candidate_id],
-                "rationale": seeded_winner.mutation_rationale,
-                "objectives": seeded_winner.objectives,
+                "idx": idx,
+                "label": label,
+                "val_aggregate": detailed.val_aggregate_scores[idx],
+                "objectives": cand.objectives,
             }
         )
-    else:
-        for i in range(1, max_iters + 1):
-            seed = max(candidates, key=lambda c: sum(c.objectives.values()))
-            try:
-                child = reflective_mutate(seed, seed.summary or source_summary)
-            except Exception as e:
-                log.exception("mutation failed at iter %d", i)
-                iteration_log.append({"iter": i, "error": str(e)})
-                break
-            _evaluate(child)
-            candidates.append(child)
-            iteration_log.append(
-                {
-                    "iter": i,
-                    "added": [child.candidate_id],
-                    "rationale": child.mutation_rationale,
-                    "objectives": child.objectives,
-                }
-            )
-            front = pareto_frontier(candidates, objectives)
-            log.info("iter %d: |frontier|=%d", i, len(front))
 
+    baseline = by_index[0]
     front = pareto_frontier(candidates, objectives)
-    # Winner ranking — sum across all objectives, with extra weight on the
-    # execution axis since that's where GEPA's prompt mutations show their
-    # work most clearly (policy_exists_called_before_cite). Tie-break with
-    # correctness > safety > cost.
+
     def _rank(c: GepaCandidate) -> tuple:
         objs = c.objectives or {}
         total = sum(objs.get(k, 0.0) for k in objectives)
@@ -315,7 +408,14 @@ def run_gepa(
             objs.get("cost", 0.0),
         )
 
-    winner = max(front, key=_rank)
+    # GEPA's own winner is best_idx; cross-check against our multi-axis rank but
+    # keep best_idx as the labeled winner for narrative consistency.
+    gepa_winner = by_index[detailed.best_idx]
+    rank_winner = max(front, key=_rank)
+    winner = gepa_winner if gepa_winner in front else rank_winner
+    # Label follows the selected winner so the UI's label and winner_id agree.
+    if winner.label != "baseline":
+        winner.label = "winner"
 
     pareto_json = {
         "objectives": objectives,
@@ -323,15 +423,19 @@ def run_gepa(
         "frontier_ids": [c.candidate_id for c in front],
         "winner_id": winner.candidate_id,
         "baseline_id": baseline.candidate_id,
+        "meta": {
+            "total_metric_calls": detailed.total_metric_calls,
+            "num_candidates_total": len(detailed.candidates),
+            "num_candidates_scored": len(candidates),
+            "best_idx": detailed.best_idx,
+            "rescore_rows": len(rows),
+            "rescore_include_judges": rescore_include_judges,
+            "winner_beats_baseline": _rank(winner) > _rank(baseline),
+        },
     }
 
-    elapsed = time.time() - started
-    log.info(
-        "gepa done: opt_run_id=%s winner=%s |candidates|=%d elapsed=%.1fs",
-        opt_run_id, winner.candidate_id, len(candidates), elapsed,
-    )
+    winner_path = write_winner_prompts(winner.prompts, winner_prompt_path)
 
-    # Persist
     with get_session() as s:
         s.add(
             OptRun(
@@ -340,20 +444,26 @@ def run_gepa(
                 example=example,
                 optimizer="gepa",
                 status="done",
-                iter_count=len(candidates) - 1,
+                iter_count=len(detailed.candidates) - 1,
                 pareto_json=json.dumps(pareto_json),
-                baseline_prompt_path=f"examples/{example}/prompts/baseline.py",
-                winner_prompt_path=f"examples/{example}/prompts/tuned.py",
+                baseline_prompt_path=baseline_prompt_path,
+                winner_prompt_path=str(winner_path),
                 config_json=json.dumps(
                     {
                         "objectives": objectives,
-                        "max_iters": max_iters,
-                        "sample_size": sample_size,
+                        "total_metric_calls": detailed.total_metric_calls,
+                        "model": _normalized_model_slug(model_slug),
+                        **(config_extra or {}),
                     }
                 ),
             )
         )
 
+    log.info(
+        "gepa bridge done: opt=%s winner=%s |frontier|=%d winner_beats_baseline=%s elapsed=%.1fs",
+        opt_run_id, winner.candidate_id, len(front),
+        pareto_json["meta"]["winner_beats_baseline"], time.time() - started,
+    )
     return GepaResult(
         opt_run_id=opt_run_id,
         source_eval_run_id=source_eval_run_id,
@@ -364,4 +474,13 @@ def run_gepa(
     )
 
 
-__all__ = ["GepaCandidate", "GepaResult", "pareto_frontier", "run_gepa"]
+__all__ = [
+    "GepaCandidate",
+    "GepaResult",
+    "build_opt_run",
+    "pareto_frontier",
+    "program_from_instructions",
+    "rescore_program",
+    "winner_prompts_dict",
+    "write_winner_prompts",
+]

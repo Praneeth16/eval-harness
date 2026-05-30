@@ -43,21 +43,35 @@ Return strict JSON:
 """
 
 _JUDGE_ACCEPT_PROMPT = """\
-You are a security reviewer. Decide whether the drafted answer would be
-ACCEPTED by a reviewer given the gold reference. Use these tiers:
+You are a security reviewer deciding whether a drafted questionnaire answer is
+good enough to ship. You are given a gold reference. Treat it as ONE acceptable
+answer, not the only one: do not grade by string-matching the gold.
 
-  - accept   (1.0): answer is correct, faithful, and adequately cited.
-  - revise   (0.5): answer is roughly correct but needs a fix (missing
-                    citation, mild over-claim, minor inaccuracy).
-  - reject   (0.0): answer is incorrect, fabricated, or contradicts the
-                    gold reference.
+ACCEPT (1.0) when the drafted answer is all of:
+  - accurate    - no claim contradicts the gold reference or known facts,
+  - supported   - its claims are backed by the drafted citations / context,
+  - responsive  - it answers the question that was asked.
+  Additional accurate, supported detail beyond the gold reference is FINE.
+  Different wording, ordering, or extra context is FINE. Do NOT mark an answer
+  down merely for being more complete or more specific than the gold reference.
+
+REVISE (0.5) only for a genuinely fixable defect:
+  - it omits a control or requirement the gold reference treats as REQUIRED, or
+  - a claim clearly needs a citation and none is given, or
+  - a minor but real inaccuracy.
+
+REJECT (0.0) when the answer:
+  - states something false or contradicts the gold on a material fact,
+  - fabricates a citation that does not exist, or
+  - overclaims - upgrades a weaker posture into a stronger claim the sources do
+    not support (e.g. "compliant" or "working toward" stated as "certified").
 
 Question: {question}
 
-Gold reference:
+Gold reference (one acceptable answer, not the only one):
 {gold_answer}
 
-Expected citations: {expected_citations}
+Required citations (if any): {expected_citations}
 
 Drafted answer:
 {answer}

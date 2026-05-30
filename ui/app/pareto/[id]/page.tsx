@@ -119,12 +119,17 @@ export default async function ParetoHero({
                 <div className="font-mono tnum text-ui-sm text-ink-muted uppercase tracking-widest">
                   Headline metrics
                 </div>
+                <p className="mt-2 text-ui-sm text-ink-muted max-w-[64ch]">
+                  The hand-tuned propose/verify/finalize agent (baseline vs tuned vs
+                  cross-framework holdout). The chart and axis bars above are the GEPA
+                  candidates — a separate optimization over this same floor.
+                </p>
                 <table className="mt-4 w-full text-ui tnum">
                   <thead>
                     <tr className="text-ui-sm text-ink-muted uppercase tracking-widest">
                       <th className="text-left py-2">metric</th>
                       <th className="text-right py-2">baseline</th>
-                      <th className="text-right py-2 text-improved">GEPA-tuned</th>
+                      <th className="text-right py-2 text-improved">tuned</th>
                       <th className="text-right py-2">holdout</th>
                     </tr>
                   </thead>

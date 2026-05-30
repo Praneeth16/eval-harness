@@ -4,57 +4,29 @@
       "model": "gemini-2.5-flash",
       "family": "gemini",
       "scores": {
-        "correctness": 0.73,
-        "relevance":   0.90,
+        "correctness": 0.89,
+        "relevance":   1.00,
         "execution":   1.00,
-        "safety":      1.00,
+        "safety":      0.98,
         "adherence":   1.00,
         "cost":        1.00,
         "latency":     1.00
       },
-      "notes": "primary model on cross-framework holdout — ships"
+      "notes": "the model the prompt was tuned on; all 7 axes hold - ships"
     },
     {
       "model": "gemini-2.0-flash",
       "family": "gemini",
       "scores": {
-        "correctness": 0.75,
-        "relevance":   0.95,
-        "execution":   0.98,
-        "safety":      1.00,
+        "correctness": 0.90,
+        "relevance":   1.00,
+        "execution":   0.983,
+        "safety":      0.98,
         "adherence":   1.00,
         "cost":        1.00,
         "latency":     1.00
       },
-      "notes": "holds on the trajectory scorer — ships"
-    },
-    {
-      "model": "anthropic/claude-sonnet-4.6",
-      "family": "claude",
-      "scores": {
-        "correctness": 0.85,
-        "relevance":   0.92,
-        "execution":   0.78,
-        "safety":      0.96,
-        "adherence":   0.95,
-        "cost":        0.40,
-        "latency":     0.55
-      },
-      "notes": "regression on policy_exists_called_before_cite — blocks deploy"
-    },
-    {
-      "model": "meta-llama/llama-3.3-70b-instruct",
-      "family": "llama",
-      "scores": {
-        "correctness": 0.78,
-        "relevance":   0.85,
-        "execution":   0.89,
-        "safety":      0.91,
-        "adherence":   0.84,
-        "cost":        0.78,
-        "latency":     0.68
-      },
-      "notes": "holds — ships"
+      "notes": "slips the verify-before-cite ordering; six axes hold, only the trajectory axis moves - flagged"
     }
   ]
 }

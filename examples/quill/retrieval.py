@@ -135,6 +135,12 @@ _index: faiss.Index | None = None
 _chunks: list[Chunk] | None = None
 
 
+def _is_gemini_embed(name: str) -> bool:
+    """Google AI Studio embedding model names go through the API path."""
+    n = name.lower()
+    return n.startswith(("gemini-embedding", "text-embedding", "models/")) or "embedding-0" in n
+
+
 def _get_encoder():
     global _model
     if _model is None:
@@ -145,7 +151,29 @@ def _get_encoder():
     return _model
 
 
+def _embed_gemini(texts: list[str], model_name: str) -> np.ndarray:
+    """Embed via Google AI Studio's OpenAI-compatible embeddings endpoint.
+
+    Returns L2-normalized float32 vectors so the flat IP index gives cosine.
+    """
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.gemini_api_key, base_url=settings.gemini_base_url)
+    out: list[list[float]] = []
+    batch = 100
+    for i in range(0, len(texts), batch):
+        resp = client.embeddings.create(model=model_name, input=texts[i : i + batch])
+        out.extend(d.embedding for d in resp.data)
+    arr = np.asarray(out, dtype="float32")
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return arr / norms
+
+
 def _embed(texts: list[str]) -> np.ndarray:
+    name = settings.embed_model
+    if _is_gemini_embed(name):
+        return _embed_gemini(texts, name)
     model = _get_encoder()
     vecs = model.encode(
         texts,

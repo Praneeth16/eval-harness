@@ -335,6 +335,38 @@ def drafter_node(state: QuillState) -> QuillState:
         citations = [citations]
     citations = [str(c).strip() for c in citations if c]
 
+    # ── Optional groundedness revise pass ──
+    # Existence-checking (propose→verify→final) makes phantom citations
+    # impossible, but it does NOT stop the model from saying more than the
+    # cited clause supports (overclaim) or omitting a control it lists. That
+    # is the failure family the judge keeps flagging on SOC 2 and ISO. When a
+    # `drafter_revise` prompt is supplied, run one more pass that rewrites the
+    # answer to stay within the verified clause text. Same deterministic-
+    # verifier-in-the-loop pattern, one layer up: from "does the ID exist?" to
+    # "does the cited clause support the claim?".
+    draft_phases = "propose-verify-final"
+    extra_cost = 0.0
+    extra_lat = 0
+    revise_template = prompts.get("drafter_revise")
+    if revise_template:
+        revise_prompt = revise_template.format(
+            question=state["parsed_question"],
+            draft=answer,
+            verified_refs=verified_refs_block,
+            context=context,
+        )
+        revise_obj, revise_resp = _llm_json(revise_prompt, model=state.get("model"))
+        acc_c = _accumulate(state, revise_resp)
+        extra_cost = acc_c["total_cost_usd"] - state.get("total_cost_usd", 0.0)
+        extra_lat = acc_c["total_latency_ms"] - state.get("total_latency_ms", 0)
+        if isinstance(revise_obj, dict) and (revise_obj.get("answer") or "").strip():
+            answer = revise_obj["answer"].strip()
+            rcites = revise_obj.get("citations") or citations
+            if isinstance(rcites, str):
+                rcites = [rcites]
+            citations = [str(c).strip() for c in rcites if c]
+            draft_phases = "propose-verify-final-ground"
+
     add_attributes(
         {
             "answer_len_words": len(answer.split()),
@@ -343,16 +375,17 @@ def drafter_node(state: QuillState) -> QuillState:
             "citation_count": len(citations),
             "citations": json.dumps(citations),
             "verification_used": True,
-            "draft_phases": "propose-verify-final",
+            "groundedness_revise": bool(revise_template),
+            "draft_phases": draft_phases,
         }
     )
-    # Merge cost / latency accumulators across the two LLM calls.
+    # Merge cost / latency accumulators across the LLM calls.
     return {
         "answer": answer,
         "citations": citations,
         "tool_invocations": tool_invocations,
-        "total_cost_usd": acc_a["total_cost_usd"] + (acc_b["total_cost_usd"] - state.get("total_cost_usd", 0.0)),
-        "total_latency_ms": acc_a["total_latency_ms"] + (acc_b["total_latency_ms"] - state.get("total_latency_ms", 0)),
+        "total_cost_usd": acc_a["total_cost_usd"] + (acc_b["total_cost_usd"] - state.get("total_cost_usd", 0.0)) + extra_cost,
+        "total_latency_ms": acc_a["total_latency_ms"] + (acc_b["total_latency_ms"] - state.get("total_latency_ms", 0)) + extra_lat,
     }
 
 

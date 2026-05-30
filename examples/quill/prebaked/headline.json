@@ -1,40 +1,34 @@
 {
   "rows": [
     {
-      "metric": "Citation correctness",
-      "baseline": "1.00",
-      "tuned": "1.00",
-      "holdout": "1.00"
-    },
-    {
-      "metric": "Verified-cite trajectory",
+      "metric": "Verify-before-cite (trajectory)",
       "baseline": "0.05",
       "tuned": "1.00",
       "holdout": "1.00"
     },
     {
-      "metric": "Hallucinated commitment rate",
-      "baseline": "0%",
-      "tuned": "0%",
-      "holdout": "0%"
-    },
-    {
       "metric": "Reviewer-accept (judge)",
       "baseline": "0.60",
-      "tuned": "0.78",
-      "holdout": "0.53"
+      "tuned": "0.85",
+      "holdout": "0.68"
+    },
+    {
+      "metric": "Correctness (axis)",
+      "baseline": "0.87",
+      "tuned": "0.95",
+      "holdout": "0.89"
+    },
+    {
+      "metric": "Pass rate (all scorers)",
+      "baseline": "0/20",
+      "tuned": "14/20",
+      "holdout": "7/20"
     },
     {
       "metric": "Avg cost / question",
       "baseline": "$0.0002",
       "tuned": "$0.0002",
-      "holdout": "$0.0003"
-    },
-    {
-      "metric": "Avg time / question",
-      "baseline": "6 s",
-      "tuned": "7 s",
-      "holdout": "7 s"
+      "holdout": "$0.0002"
     }
   ]
 }

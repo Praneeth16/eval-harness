@@ -91,3 +91,23 @@ logs/
 # ── Misc ────────────────────────────────────────────────────────────────────
 .cache/
 tmp/
+.gstack/
+
+# ── Deck build artifacts + internal working files (not for public repo) ──────
+# Keep: docs/deck/journey-of-an-agent.{html,pdf} and docs/Companion_Article.md
+docs/deck/node_modules/
+docs/deck/package.json
+docs/deck/package-lock.json
+docs/deck/export-pdf.js
+docs/deck/_sections.html
+docs/deck/_custom.css
+docs/deck/_prior_light_backup/
+docs/deck/DEMO_SCRIPT.md
+docs/deck/REAL_NUMBERS.md
+docs/deck/IMAGE_PROMPTS.md
+
+# ── Internal session docs + third-party reference scrapes (not for audience) ──
+docs/Runbook.md
+docs/Session_Plan_Journey_of_an_Agent.md
+docs/Transcript_*.md
+docs/refs/
