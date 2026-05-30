@@ -54,7 +54,7 @@ export default async function RunDetailPage({
                 <span>{run.model}</span>
                 <span>·</span>
                 <span>{relativeTime(run.started_at)}</span>
-                <RunBadge status={run.status} />
+                <RunBadge status={run.status} passCount={run.pass_count} traceCount={run.trace_count} />
               </div>
             )}
           </div>

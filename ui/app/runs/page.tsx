@@ -74,7 +74,7 @@ export default async function RunsPage() {
                 </Td>
                 <Td align="right" className="font-mono">{fmtCostUSD(r.total_cost_usd)}</Td>
                 <Td align="right" className="font-mono">{fmtMs(r.total_latency_ms)}</Td>
-                <Td><RunBadge status={r.status} /></Td>
+                <Td><RunBadge status={r.status} passCount={r.pass_count} traceCount={r.trace_count} /></Td>
                 <Td align="right" className="text-ink-muted">{relativeTime(r.started_at)}</Td>
               </tr>
             ))}

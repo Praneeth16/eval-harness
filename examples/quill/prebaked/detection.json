@@ -1,6 +1,6 @@
 {
   "title": "What each eval layer actually sees",
-  "subtitle": "Three failures that a vibe check and a string/citation eval wave through — and that this harness catches. Every number is a real prebaked score (headline.json, portability.json, GEPA held-out).",
+  "subtitle": "Three real failures that a vibe check and a string/citation eval wave through, and that this harness catches. Every number is a real eval score: the trajectory scorer, the held-out judge, and a cross-model run.",
   "layers": [
     { "key": "vibe", "label": "Vibe check", "kind": "naive" },
     { "key": "string", "label": "String / citation eval", "kind": "naive" },
@@ -9,32 +9,32 @@
   "rows": [
     {
       "scenario": "Baseline cites a policy that doesn't exist",
-      "detail": "Cold-open Q89/Q102 — phantom \"Vendor-Mgmt v2\", \"PCI-DSS certified\". Citations are well-formed; the claim is false.",
+      "detail": "Cold-open Q89/Q102 - phantom \"Vendor-Mgmt v2\", \"PCI-DSS certified\". Citations are well-formed; the claim is false.",
       "axis": "execution",
       "cells": [
         { "verdict": "pass", "label": "reads fine", "note": "confident tone, plausible answer" },
         { "verdict": "pass", "label": "1.00", "note": "citation strings are well-formed" },
-        { "verdict": "caught", "label": "0.10", "note": "verify-before-cite trajectory fails — the agent never called policy_exists_check" }
-      ]
-    },
-    {
-      "scenario": "Ship Claude — the most correct model — to production",
-      "detail": "Claude scores 0.85 correctness, beating Gemini's 0.73. A string-only gate ships it.",
-      "axis": "execution",
-      "cells": [
-        { "verdict": "na", "label": "n/a", "note": "no model-level signal" },
-        { "verdict": "pass", "label": "ships · 0.85", "note": "highest correctness of any model" },
-        { "verdict": "block", "label": "blocked · exec 0.78", "note": "calls the verifier post-hoc — ordering check blocks deploy" }
+        { "verdict": "caught", "label": "0.05", "note": "verify-before-cite trajectory fails - the agent never called policy_exists_check" }
       ]
     },
     {
       "scenario": "Tuned prompt evaluated on an unseen framework",
-      "detail": "Reviewer-accept holds at 0.78 on SOC 2 but drops to 0.55 on the ISO 27001 held-out set.",
+      "detail": "The citation checks still hold on ISO 27001, but the semantic judge does not: judge-accept drops from 0.85 on SOC 2 to 0.68 on the held-out set, and pass rate falls 14/20 to 7/20.",
       "axis": "correctness",
       "cells": [
         { "verdict": "pass", "label": "reads fine", "note": "still fluent and confident" },
-        { "verdict": "pass", "label": "well-formed", "note": "citations resolve in-corpus" },
-        { "verdict": "flag", "label": "overfit · 0.78→0.55", "note": "held-out judge drop surfaces the overfit before it ships" }
+        { "verdict": "pass", "label": "citations resolve", "note": "every cited ID is in-corpus" },
+        { "verdict": "flag", "label": "judge-accept 0.85 -> 0.68", "note": "held-out judge drop surfaces the overfit before it ships" }
+      ]
+    },
+    {
+      "scenario": "Swap the model, same prompt",
+      "detail": "gemini-2.5-flash to gemini-2.0-flash on the held-out set. Answers read fine; only the trajectory axis moves.",
+      "axis": "execution",
+      "cells": [
+        { "verdict": "na", "label": "n/a", "note": "no model-level signal" },
+        { "verdict": "pass", "label": "answers read fine", "note": "the final strings are well-formed on both models" },
+        { "verdict": "flag", "label": "exec 1.00 -> 0.983", "note": "one question slips the verify-before-cite ordering on the new model" }
       ]
     }
   ],

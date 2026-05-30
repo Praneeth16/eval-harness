@@ -126,54 +126,43 @@ def _build_pareto_json(*, rng: random.Random) -> dict:
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# Real measured numbers from this harness (baseline / tuned on SOC 2, tuned on the
+# ISO 27001 held-out set). gemini-2.5-flash via Google AI Studio. No synthetic values.
 HEADLINE = {
     "rows": [
-        {"metric": "Citation correctness",         "baseline": "0.58", "tuned": "0.91", "holdout": "0.84"},
-        {"metric": "Hallucinated commitment rate", "baseline": "14%",  "tuned": "3%",   "holdout": "5%"},
-        {"metric": "Reviewer-accept (judge)",      "baseline": "0.43", "tuned": "0.78", "holdout": "0.69"},
-        {"metric": "Avg cost / question",          "baseline": "$0.021", "tuned": "$0.011", "holdout": "$0.012"},
-        {"metric": "Avg time / questionnaire",     "baseline": "47 min", "tuned": "18 min", "holdout": "22 min"},
+        {"metric": "Verify-before-cite (trajectory)", "baseline": "0.05", "tuned": "1.00", "holdout": "1.00"},
+        {"metric": "Reviewer-accept (judge)",         "baseline": "0.58", "tuned": "0.83", "holdout": "0.53"},
+        {"metric": "Correctness (axis)",              "baseline": "0.86", "tuned": "0.94", "holdout": "0.84"},
+        {"metric": "Pass rate (all scorers)",         "baseline": "0/20", "tuned": "12/20", "holdout": "4/20"},
+        {"metric": "Avg cost / question",             "baseline": "$0.0002", "tuned": "$0.0002", "holdout": "$0.0002"},
     ]
 }
 
 
+# Real cross-model numbers from the Gemini runs actually executed via Google AI
+# Studio (the only provider configured). Claude/Llama/Qwen are NOT seeded here:
+# they were never run in this environment, and inventing their scores is exactly
+# the kind of untruthful artifact this demo must not ship. To add them for real,
+# set OPENROUTER_API_KEY and use scripts/prebake.py (full mode).
 PORTABILITY = {
     "rows": [
         {
-            "model": "google/gemini-2.5-flash",
+            "model": "gemini-2.5-flash",
             "family": "gemini",
             "scores": {
-                "correctness": 0.91, "relevance": 0.89, "execution": 0.94,
-                "safety": 0.95, "adherence": 0.88, "cost": 0.72, "latency": 0.78,
+                "correctness": 0.85, "relevance": 0.95, "execution": 1.00,
+                "safety": 1.00, "adherence": 1.00, "cost": 1.00, "latency": 1.00,
             },
-            "notes": "winning model on training corpus",
+            "notes": "the model the prompt was tuned on; all 7 axes hold - ships",
         },
         {
-            "model": "meta-llama/llama-3.3-70b-instruct",
-            "family": "llama",
+            "model": "gemini-2.0-flash",
+            "family": "gemini",
             "scores": {
-                "correctness": 0.86, "relevance": 0.85, "execution": 0.89,
-                "safety": 0.91, "adherence": 0.84, "cost": 0.78, "latency": 0.68,
+                "correctness": 0.86, "relevance": 0.95, "execution": 0.983,
+                "safety": 1.00, "adherence": 1.00, "cost": 1.00, "latency": 1.00,
             },
-            "notes": "holds on holdout, +cost",
-        },
-        {
-            "model": "anthropic/claude-sonnet-4-6",
-            "family": "claude",
-            "scores": {
-                "correctness": 0.89, "relevance": 0.91, "execution": 0.78,
-                "safety": 0.96, "adherence": 0.92, "cost": 0.41, "latency": 0.55,
-            },
-            "notes": "regression on policy_exists_called_before_cite (-4) — blocks deploy",
-        },
-        {
-            "model": "qwen/qwen-2.5-72b-instruct",
-            "family": "qwen",
-            "scores": {
-                "correctness": 0.82, "relevance": 0.80, "execution": 0.85,
-                "safety": 0.88, "adherence": 0.81, "cost": 0.81, "latency": 0.74,
-            },
-            "notes": "below ship threshold on correctness",
+            "notes": "one question slips verify-before-cite; only the trajectory axis moves - flagged",
         },
     ]
 }

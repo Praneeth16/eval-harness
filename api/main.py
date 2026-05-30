@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
 from api.schemas import (
@@ -90,22 +92,34 @@ def _serialize_eval_run(row: EvalRun, *, trace_count: int = 0, pass_count: int =
 def list_runs(limit: int = 50) -> list[EvalRunOut]:
     with get_session() as s:
         rows = s.execute(
-            select(EvalRun).order_by(desc(EvalRun.started_at)).limit(limit)
+            select(EvalRun).order_by(desc(EvalRun.started_at)).limit(limit * 3)
         ).scalars().all()
         out: list[EvalRunOut] = []
         for r in rows:
             tc = s.execute(
                 select(func.count(Trace.id)).where(Trace.eval_run_id == r.id)
             ).scalar_one()
-            # Pass = no failing scores for the trace.
+            # Count traces that actually carry scores. Internal GEPA-candidate
+            # rollouts and portability stubs have traces but no scores; left in,
+            # they render as a misleading 100% pass / 0ms run. Skip them.
+            scored = s.execute(
+                select(func.count(func.distinct(Score.trace_id)))
+                .select_from(Score)
+                .join(Trace, Score.trace_id == Trace.id)
+                .where(Trace.eval_run_id == r.id)
+            ).scalar_one()
+            if scored == 0:
+                continue
             fail_trace_ids = s.execute(
                 select(Trace.id)
                 .join(Score, Score.trace_id == Trace.id)
                 .where(Trace.eval_run_id == r.id, Score.passed == 0)
                 .distinct()
             ).scalars().all()
-            pc = max(0, tc - len(set(fail_trace_ids)))
+            pc = max(0, scored - len(set(fail_trace_ids)))
             out.append(_serialize_eval_run(r, trace_count=tc, pass_count=pc))
+            if len(out) >= limit:
+                break
         return out
 
 
@@ -333,14 +347,34 @@ def _load_prompt_module(path: str) -> dict:
     return out
 
 
+def _canonical_prompts(d: dict) -> dict:
+    """Map a prompt module's vars onto canonical roles (drafter, classifier) so
+    baseline and tuned align in the diff, whatever each file names them."""
+    def pick(*names: str) -> str:
+        for n in names:
+            v = d.get(n)
+            if isinstance(v, str) and v.strip():
+                return v
+        return ""
+
+    out: dict = {}
+    drafter = pick("DRAFTER_PROMPT", "DRAFT_INSTRUCTION", "DRAFTER_FINAL_PROMPT")
+    classifier = pick("CLASSIFIER_PROMPT", "CLASSIFY_INSTRUCTION")
+    if drafter:
+        out["drafter"] = drafter
+    if classifier:
+        out["classifier"] = classifier
+    return out
+
+
 @app.get("/prompt-diff/{opt_id}", response_model=PromptDiffOut)
 def get_prompt_diff(opt_id: str) -> PromptDiffOut:
     with get_session() as s:
         r = s.get(OptRun, opt_id)
         if r is None:
             raise HTTPException(404, "opt run not found")
-        baseline = _load_prompt_module(r.baseline_prompt_path or "")
-        tuned = _load_prompt_module(r.winner_prompt_path or "")
+        baseline = _canonical_prompts(_load_prompt_module(r.baseline_prompt_path or ""))
+        tuned = _canonical_prompts(_load_prompt_module(r.winner_prompt_path or ""))
 
         rationale: list[str] = []
         if r.pareto_json:
@@ -430,6 +464,76 @@ def kickoff_quill_run(req: RunRequest, bg: BackgroundTasks) -> dict:
 
     bg.add_task(_job)
     return {"status": "queued", "golden": str(golden), "use_tuned_prompts": req.use_tuned_prompts}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Live compare — baseline vs tuned agent on a single question
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class CompareReq(BaseModel):
+    question: str
+
+
+def _citation_status(tok: str) -> dict:
+    """Resolve whether a citation token points at a real corpus entry."""
+    from examples.quill import retrieval
+
+    raw = (tok or "").strip()
+    u = raw.upper()
+    ok = False
+    try:
+        if u.startswith(("FW:", "FW::")):
+            body = re.split(r":+", raw, 1)[1]
+            parts = [p for p in re.split(r"[\s:]+", body) if p]
+            ok = retrieval.framework_clause_resolves(parts[0], parts[1]) if len(parts) >= 2 else False
+        elif u.startswith(("POL:", "POL::")):
+            ok = retrieval.policy_exists(re.split(r":+", raw, 1)[1].strip())
+        else:
+            ok = retrieval.policy_exists(raw)
+    except Exception:
+        ok = False
+    return {"id": raw, "verified": bool(ok)}
+
+
+@app.post("/examples/quill/compare")
+def compare_agents(req: CompareReq) -> dict:
+    """Run the baseline (single-call) and tuned (propose/verify/finalize) agent
+    on the same question, live, and return both for side-by-side comparison."""
+    from examples.quill.graph import run_question
+    from examples.quill.prompts.tuned import as_prompts_dict
+
+    q = (req.question or "").strip()
+    if not q:
+        raise HTTPException(400, "question is required")
+
+    def _side(prompts: dict) -> dict:
+        r = run_question(q, prompts=prompts)
+        cites = [_citation_status(c) for c in r.citations]
+        verified_before_cite = any(
+            ti.get("tool") in ("policy_exists_check", "framework_clause_check")
+            for ti in r.tool_invocations
+        )
+        return {
+            "answer": r.answer,
+            "citations": cites,
+            "all_verified": bool(cites) and all(c["verified"] for c in cites),
+            "has_phantom": any(not c["verified"] for c in cites),
+            "verified_before_cite": verified_before_cite,
+            "category": r.category,
+            "risk_tier": r.risk_tier,
+            "gap_detected": r.gap_detected,
+            "cost_usd": r.cost_usd,
+            "latency_ms": r.latency_ms,
+        }
+
+    try:
+        baseline = _side({})
+        tuned = _side(as_prompts_dict())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"compare failed: {e}") from e
+
+    return {"question": q, "baseline": baseline, "tuned": tuned}
 
 
 # ─────────────────────────────────────────────────────────────────────────
