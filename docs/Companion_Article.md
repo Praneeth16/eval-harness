@@ -2,11 +2,11 @@
 
 **A practitioner's guide to building self-evolving eval harnesses**
 
-Code, traces, and prebaked artifacts: [github.com/Praneeth16/eval-harness](https://github.com/Praneeth16/eval-harness). This piece began as a talk at AI Engineer Bangalore (May 2026). Every number below is a real eval score from the open-source harness, not an illustration; where a result is null, it is reported as null.
+Code, traces, and prebaked artifacts: [github.com/Praneeth16/eval-harness](https://github.com/Praneeth16/eval-harness). Every result reported from the harness below is a real eval score, not an illustration, and where a result is null it is reported as null. Worked examples used to make a point (the 73-to-81 pass rate, the cost-versus-correctness tradeoffs) are hypothetical scenarios, not measurements.
 
 ---
 
-## 0. Cold open: the moment a demo becomes a liability
+## When a demo becomes a liability
 
 Question 89 in our SOC 2 questionnaire: *"What is your access-revocation SLA for terminated employees?"* Our agent (a multi-step LangGraph pipeline retrieving from a 30-document policy corpus) answered: *"Per our policy ACC-007 and Vendor-Mgmt v2, we revoke access within 4 hours of HR notification."*
 
@@ -20,11 +20,11 @@ This is the gap the article is about: an agent that demos well, in front of frie
 
 > **How do you know your agent works, on inputs you haven't seen yet, before a customer finds out for you?**
 
-If you have already lived this moment, you can skip the next two sections. If you haven't yet, you will.
+If you have already lived this moment, you can skip ahead. If you haven't yet, you will.
 
 ---
 
-## 1. The vibe-check trap
+## The vibe-check trap
 
 Many teams start the same way: wire up an agent in a notebook, run five friendly questions, eyeball the answers, and treat that as evidence. The trap is not that this is wrong. It is the correct first move. The trap is that it scales worse than it looks like it scales.
 
@@ -45,7 +45,7 @@ We will return to each.
 
 ---
 
-## 2. The framing choice: benchmark-maxxer or floor-raiser?
+## Benchmark-maxxer or floor-raiser
 
 Before any code, there is a fork that determines everything downstream, and most teams take it without noticing. Ben Hylak's *2026 Guide to Evaluating AI Agents* ([howtoeval.com, May 2026](https://www.howtoeval.com/)) draws the line cleanly: **benchmark-maxxer** versus **floor-raiser**.
 
@@ -57,11 +57,11 @@ Floor-raising is error analysis dressed as evaluation. It begins by reading trac
 
 The mental model Hylak lands on: a floor-raising eval suite is *"a memory of bugs you refuse to reintroduce."* This is closer to how senior engineers think about regression tests than how researchers think about benchmarks. It is also why most hosted eval platforms feel uncanny: they are built for benchmark-maxxers, with leaderboards and aggregate scores, when the work that actually moves your agent forward is closer to incident review.
 
-This harness and this article are floor-raising tools. If you came looking for a benchmark, the literature in the references will serve you better. If you came looking for the discipline that prevents the cold-open scenario from happening in front of your customer, read on.
+This harness and this article are floor-raising tools. If you came looking for a benchmark, the literature in the references will serve you better. If you came looking for the discipline that prevents the opening scenario from happening in front of your customer, read on.
 
 ---
 
-## 3. Outcomes versus outputs: the trajectory question
+## Outcomes versus outputs
 
 Cameron Wolfe's *Agent Evaluation: A Detailed Guide* ([cameronrwolfe.substack.com, May 2026](https://cameronrwolfe.substack.com/p/agent-evals)) draws the second indispensable distinction. An agent's **output** is the text it returned. An agent's **outcome** is the state of the world after the run. These are not the same thing, and the gap between them is where most agent failures hide.
 
@@ -71,11 +71,11 @@ The implication for evaluation is that **scoring the output is a category error*
 
 This is also why **trajectory** is a first-class evaluation signal. Tejas Kumar's *Harnesses in AI: A Deep Dive* (AI Engineer, May 2026): *"an agent harness is everything around the model that gives it grounding in reality."* This sits next to Wolfe's framing. The path the agent took is diagnostic in a way the final answer is not. If the agent answered correctly but never called the retrieval tool, the correctness was a coincidence and will not generalize. If the agent called the right tools in the wrong order, the answer might pass today and fail next week when the corpus shifts. If the agent called a verification tool *after* writing its final answer, then the verification was theater.
 
-Wolfe formalizes this into five tool-call metrics (*invocation, selection, structural, trajectory, outcome* accuracy), and the practical advice is that you want at least two of these grading every run. We pick *trajectory* and *outcome* as the pair our harness relies on. For Quill, the outcome is not a world-changing side effect like booking a restaurant; it is the *content of the response packet that will be sent to the customer's security reviewer*. We decompose it into two layers. The deterministic layer verifies: (a) every cited policy ID exists in the corpus, (b) every cited framework clause resolves to a real clause, and (c) no past-response phrase (`PAST:*` prefix) was laundered into a citation. The judge-graded layer verifies whether the cited clause semantically supports the answer's claim, and whether the answer overstates the clause (e.g. collapses "working toward PCI" into "PCI compliant"). The split matters: semantic overclaim cannot be checked with regex; citation membership cannot be checked with a judge alone. The trajectory check then ensures the deterministic verifiers ran *before* the answer was finalized, not after, not in parallel, not as an afterthought. We return to this in section 8, because it is the single hardest piece of our harness to get right honestly.
+Wolfe formalizes this into five tool-call metrics (*invocation, selection, structural, trajectory, outcome* accuracy), and the practical advice is that you want at least two of these grading every run. We pick *trajectory* and *outcome* as the pair our harness relies on. For Quill, the outcome is not a world-changing side effect like booking a restaurant; it is the *content of the response packet that will be sent to the customer's security reviewer*. We decompose it into two layers. The deterministic layer verifies: (a) every cited policy ID exists in the corpus, (b) every cited framework clause resolves to a real clause, and (c) no past-response phrase (`PAST:*` prefix) was laundered into a citation. The judge-graded layer verifies whether the cited clause semantically supports the answer's claim, and whether the answer overstates the clause (e.g. collapses "working toward PCI" into "PCI compliant"). The split matters: semantic overclaim cannot be checked with regex; citation membership cannot be checked with a judge alone. The trajectory check then ensures the deterministic verifiers ran *before* the answer was finalized, not after, not in parallel, not as an afterthought. We return to this under *Honest trajectories*, because it is the single hardest piece of our harness to get right honestly.
 
 ---
 
-## 4. Eval-driven development is a loop, not a checklist
+## Evaluation is a loop, not a checklist
 
 If you read one piece of canonical material on eval methodology in 2026, read the MLflow team's *Structuring AI Evaluation and Observability* ([mlflow.org, April 2026](https://mlflow.org/blog/structured-ai-eval/)). The framing they propose, three phases repeated indefinitely, is the cleanest articulation of the practitioner's workflow we have seen:
 
@@ -94,13 +94,13 @@ In our harness, the three phases map cleanly onto the modules: `core/tracing/` i
 
 The detail that matters most, and the one teams skip first: **the evaluation dataset is a living artifact, not a fixed test set**. Damji is explicit about this: *"perfect ground truth labels are unnecessary; iterative evaluation datasets combined with LLM judges provide sufficient signal."* Treating your golden set as fixed is a benchmark-maxxer move. Treating it as a queue of past incidents you refuse to repeat is a floor-raiser move.
 
-It is the one piece of advice everyone gives and almost no one operationalizes, because it requires building the pipeline for converting production traces into golden set entries, and that pipeline is not glamorous to build. For our demo, `scripts/seed_cold_open.py` turns the Q89 and Q102 failures into permanent regression cases, sticky at the demo URL so they cannot quietly drift out of the suite.
+It is the one piece of advice everyone gives and almost no one operationalizes, because it requires building the pipeline for converting production traces into golden set entries, and that pipeline is not glamorous to build. In this harness, `scripts/seed_cold_open.py` turns the Q89 and Q102 failures into permanent regression cases, pinned so they cannot quietly drift out of the suite.
 
 ---
 
-## 5. CLEAR-S: scoring as a coordinate system
+## CLEAR-S: scoring as a coordinate system
 
-Aggregate accuracy is a lie agreed upon. The moment you collapse a multi-dimensional system into a single scalar, you lose the information that would tell you *how* to improve it. The pass rate went from 73% to 81%. Wonderful. But did latency get worse? Did cost go up? Did the agent start hallucinating in a new way the old scorer doesn't catch? You don't know.
+Aggregate accuracy is a lie agreed upon. The moment you collapse a multi-dimensional system into a single scalar, you lose the information that would tell you *how* to improve it. Say the pass rate went from 73% to 81% (a hypothetical, to make the point). Wonderful. But did latency get worse? Did cost go up? Did the agent start hallucinating in a new way the old scorer doesn't catch? You don't know.
 
 Our harness adopts a 7-axis scoring scheme we call **CLEAR-S** (the acronym covers six axes; *cost* is the seventh, deliberately broken out from "latency" because cost regressions look identical to latency improvements in casual review):
 
@@ -129,7 +129,7 @@ If your eval reports a single number, you have a thermometer. If your eval repor
 
 ---
 
-## 6. Layered scorers: the Swiss Cheese strategy
+## Layered scorers: the Swiss-cheese sieve
 
 No scorer is complete. We use layers because each one fails differently. Deterministic checks miss semantic errors. Judges miss structural errors. Trajectory checks miss content errors. Together they form a sieve dense enough to catch the cases that matter.
 
@@ -154,7 +154,7 @@ The non-obvious detail: **a scorer with a bug is worse than no scorer at all**, 
 
 ---
 
-## 7. The LLM-judge problem
+## The LLM-judge problem
 
 LLM-as-judge is the workhorse of modern eval, and it is the single most over-promised tool in the stack. The right mental model is a low-cost reviewer with systematic biases, not an objective grader. Treat it accordingly.
 
@@ -174,7 +174,7 @@ Shankar's qualitative-analysis piece sharpens this: *"agents execute mechanical 
 
 ---
 
-## 8. Honest trajectories: propose, verify, then finalize
+## Honest trajectories: propose, verify, finalize
 
 This is the section that took us the longest to get right and the one that almost every public agent demo gets wrong.
 
@@ -188,7 +188,7 @@ def drafter(state):
 
 The model is asked, in one call, to produce both the answer and the citations. The citations are whatever the model decided to attach. If the model hallucinates a policy ID that sounds plausible, the citation looks correct. The retrieval step ran *earlier*, the verifier step (if it exists) runs *later*, and the answer was already written before either happened.
 
-We ran this for two weeks. It passed our deterministic scorers (citations are well-formed strings) and it passed our judge scorer (the answer was relevant). It failed in exactly the way the cold open describes: phantom citations that looked exactly like real ones, and our scorers could not tell, because all the evidence was in the *ordering* of the tool calls, not in the final string.
+We ran this for two weeks. It passed our deterministic scorers (citations are well-formed strings) and it passed our judge scorer (the answer was relevant). It failed in exactly the way the opening examples describe: phantom citations that looked exactly like real ones, and our scorers could not tell, because all the evidence was in the *ordering* of the tool calls, not in the final string.
 
 The fix is the **propose / verify / finalize** pattern, which is the same shape Teresa Torres describes in her opportunity-solution-tree piece ([producttalk.org, May 2026](https://www.producttalk.org/behind-the-scenes-ai-osts/)) and which Cameron Wolfe references as the *outcome-driven* style of evaluation. In our LangGraph DAG, the drafter node now has three phases:
 
@@ -198,7 +198,7 @@ The fix is the **propose / verify / finalize** pattern, which is the same shape 
 
 The trajectory scorer can now make three load-bearing claims, all verifiable from the MLflow span tree: *the verification tool fired before the final answer was written* (finalize-span `start_time` strictly greater than verify-span `end_time`), *every cited ID in the final answer is a member of the verified-refs list*, and *no citation appears in the final answer that was not in the verified candidate pool*. These three together are the honest version of "the agent verified citation membership before finalization." They do *not* check that the cited clause semantically supports the claim. That is a judge-graded property, not a deterministic one. Any of the three checks in isolation is theater; all three together still leave semantic correctness as a separate axis.
 
-The numbers from our prebake tell the story. The baseline (single-call drafter) scored **0.05** on the verify-before-cite trajectory axis across 20 SOC 2 questions. The propose/verify/finalize variant scored **1.00** on the same set, and **1.00** again on the held-out ISO 27001 framework (20 questions, never seen during tuning). State the claim precisely once and never inflate it past that: *the ordering-and-membership constraint - verifier fired before the finalize span, every cited ID present in the verified-refs list - transfers to the held-out framework; the semantic-correctness claim does not.* The reviewer-accept judge, which is the semantic check, drops from **0.85** on SOC 2 to **0.68** on ISO 27001. That gap is the entire reason §12 and §13 exist.
+The numbers from our prebake tell the story. The baseline (single-call drafter) scored **0.05** on the verify-before-cite trajectory axis across 20 SOC 2 questions. The propose/verify/finalize variant scored **1.00** on the same set, and **1.00** again on the held-out ISO 27001 framework (20 questions, never seen during tuning). State the claim precisely once and never inflate it past that: *the ordering-and-membership constraint - verifier fired before the finalize span, every cited ID present in the verified-refs list - transfers to the held-out framework; the semantic-correctness claim does not.* The reviewer-accept judge, which is the semantic check, drops from **0.85** on SOC 2 to **0.68** on ISO 27001. That gap is the entire reason *Self-evolving prompts* and *What naive eval misses* exist.
 
 <!-- FIGURE 5 -->
 ![Figure 5. The trajectory constraint, made visible in the span tree. Naive (top): a single drafter span writes answer and citations together. Propose/verify/finalize (bottom): the verify span closes strictly before the finalize span opens.](./figures/05-propose-verify-finalize-spans.png)
@@ -211,7 +211,7 @@ The corollary is that if you cannot write a deterministic verifier for your doma
 
 ---
 
-## 9. Error analysis is the highest-ROI activity
+## Error analysis is the highest-ROI activity
 
 Hamel Husain has been saying this for two years; Hylak quotes him again in 2026: *"Error analysis is the single most valuable activity in AI development and consistently the highest-ROI activity."* The claim sounds like advice and reads like cliché until you actually do it for a week.
 
@@ -223,13 +223,13 @@ At small scale (≤200 failures) you do this by hand. Beyond that, you need mach
 
 The step they describe and most teams skip is **slice lift**: for each (case_type, behavior_pattern) combination, compute the ratio of slice-pattern-share to overall-pattern-share. Lift > 1 means the failure mode is *concentrated* in this slice. This is the difference between "the agent has a 15% failure rate" (useless) and "the agent has a 60% failure rate on questions tagged `pricing_exception_compound`" (actionable, immediate next step is to inspect that slice).
 
-In our harness, the same idea lives in `core/clusters/cluster.py`. We group failures by `(clear_axis, scorer_name)` and surface the dominant groups in the UI. At our demo scale (50-question golden set, single-digit groups) this is *grouping*, not clustering: there is no embedding, no UMAP, no HDBSCAN, just a sorted dict. The distinction matters because grouping-by-scorer can only surface failure modes the scorers already know to look for, while trace-embedding clustering can discover *novel* behavior patterns the scorers missed. At 50 questions, novel patterns are a luxury; there are not enough traces to cluster. Past about a thousand failures, the OpenAI cookbook's BERTopic + HDBSCAN approach becomes the right tool, and the grouping output transitions from "the dominant failure modes" to "the dominant *known* failure modes, with clustering as a separate signal for the unknown ones."
+In our harness, the same idea lives in `core/clusters/cluster.py`. We group failures by `(clear_axis, scorer_name)` and surface the dominant groups in the UI. At this scale (a 50-question golden set, single-digit groups) this is *grouping*, not clustering: there is no embedding, no UMAP, no HDBSCAN, just a sorted dict. The distinction matters because grouping-by-scorer can only surface failure modes the scorers already know to look for, while trace-embedding clustering can discover *novel* behavior patterns the scorers missed. At 50 questions, novel patterns are a luxury; there are not enough traces to cluster. Past about a thousand failures, the OpenAI cookbook's BERTopic + HDBSCAN approach becomes the right tool, and the grouping output transitions from "the dominant failure modes" to "the dominant *known* failure modes, with clustering as a separate signal for the unknown ones."
 
 The deeper move is the AgentTrace-style **suspect scoring** the cookbook describes: from a focus event (the failure), walk backward through the span graph, score each upstream node by `0.4 × proximity + 0.3 × frequency + 0.2 × bridge + 0.1 × role`. The output is a ranked list of *suspects*: nodes in the agent's execution graph that are statistically associated with the failure. This is what production root-cause analysis for agents looks like, and there is no good way to do it without span-level tracing in place from day one. (Phase 1 of MLflow's three phases. The phase you cannot skip.)
 
 ---
 
-## 10. Open-coding without losing taste
+## Open-coding without losing taste
 
 Shankar's qualitative-analysis piece is not, on its face, an evaluation paper. It is a study of agents trying to do the work qualitative researchers do: open-coding tweets, building taxonomies, writing memos. The findings are directly relevant to eval design and they generalize to LLM-judge eval in particular:
 
@@ -250,9 +250,9 @@ The second-order point, and this is where the section earns its keep, is that **
 
 ---
 
-## 11. The deterministic-verifier-in-the-loop pattern
+## The deterministic-verifier-in-the-loop pattern
 
-We named this pattern in section 8 and it deserves its own section because it is the single most reliable architectural move we know.
+We named this pattern under *Honest trajectories* and it deserves its own section because it is the single most reliable architectural move we know.
 
 Torres tells the story end-to-end in *Behind the Scenes: Building AI-Generated Opportunity Solution Trees* ([producttalk.org, May 2026](https://www.producttalk.org/behind-the-scenes-ai-osts/)). The setup: she is building a service that updates an opportunity-solution tree based on new customer interviews. The model proposes a change set (splits, merges, adds, deletes); a deterministic function applies the change set to the input tree; the result is supposed to match the output tree the model claimed it produced. Around the 14th interview upload, the system started shipping change sets that didn't actually produce the claimed tree.
 
@@ -268,13 +268,13 @@ The pattern shows up everywhere once you have the name for it:
 - **SQL agents.** The query planner is a verifier. The schema is a verifier. Some teams use a sandbox database that runs the query and returns row counts as the verifier.
 - **Our Quill agent.** `policy_exists_check` is a verifier. `framework_clause_resolves` is a verifier. The MLflow span ordering check is a *meta-verifier*: it verifies that the verifiers ran in the right order.
 
-The corollary, restated: **wherever you can write a verifier, write one and hand it to the model**. Wherever you cannot, you are doing harder work than you think, and the failure mode will be the cold-open scenario, only on a topic you care more about than security questionnaires.
+The corollary, restated: **wherever you can write a verifier, write one and hand it to the model**. Wherever you cannot, you are doing harder work than you think, and the failure mode will be the opening scenario, only on a topic you care more about than security questionnaires.
 
 The second-order question, which the literature has not answered well: *what do you do when the verifier itself is an LLM?* This is the recursive case: your evaluator is an agent, your agent calls a verifier-agent, the verifier-agent is sometimes wrong. We do not have a clean answer. The best we have is "calibrate against humans on a small set, and never let the verifier and the agent share weights." If you find a better answer, please write it up.
 
 ---
 
-## 12. Self-evolving prompts: DSPy + GEPA, and why it is qualitatively different
+## Self-evolving prompts: DSPy and GEPA
 
 So far the article has been about *evaluating* an agent. This section is about *improving* one, automatically, at the prompt level.
 
@@ -286,7 +286,7 @@ This is qualitatively different from "I, the human prompt engineer, will read fa
 
 1. **The search space is broader than what a human will explore.** GEPA explores prompt variants humans may avoid because they look awkward, redundant, or off-key. Every variant still has to survive the scorer suite, so weirdness alone does not win, but weirdness is no longer disqualifying.
 2. **The scorer suite is in the loop.** A human edit is a hypothesis; a GEPA mutation is a hypothesis *and an experiment*. Every candidate is graded against all 7 axes before it survives to the next round.
-3. **The selection is multi-objective.** This is the section's payoff and the next section's subject. A single-objective optimizer would converge on whatever maximizes correctness even if it costs 3x more and runs 2x slower. GEPA, configured for multi-objective Pareto selection, keeps the *frontier*: every prompt that is non-dominated on some combination of axes.
+3. **The selection is multi-objective.** This is the multi-objective idea that *What naive eval misses, and the Pareto frontier behind it* builds on. A single-objective optimizer would converge on whatever maximizes correctness even if it costs 3x more and runs 2x slower. GEPA, configured for multi-objective Pareto selection, keeps the *frontier*: every prompt that is non-dominated on some combination of axes.
 
 The MLflow integration makes this concrete:
 
@@ -302,32 +302,32 @@ result = mlflow.genai.optimize_prompts(
 )
 ```
 
-Our harness runs a genuine `dspy.GEPA` loop (`scripts/run_real_gepa.py`; bridge in `core/optimizer/gepa.py`). We seed the `classify` and `draft` predictors with the *deliberately-broken baseline* instructions, then let GEPA evolve them. The contract is the load-bearing detail (§7): the metric returns `dspy.Prediction(score, feedback)` where the **feedback string** - assembled from concrete CLEAR-S scorer details (the phantom IDs, the overclaims, the cited-but-unverified refs) - is the gradient the reflection LM reads. Task rollouts run on a cheap model (Gemini Flash); the reflection LM is a stronger model; the data split is train = SOC 2[:16], Pareto-tracking val = ISO 27001 (20), with a held-out SOC 2 tail GEPA never sees. Budget matters more than people expect: a few hundred metric calls is the floor where reflective mutation beats noise - our run used ~300.
+Our harness runs a genuine `dspy.GEPA` loop (`scripts/run_real_gepa.py`; bridge in `core/optimizer/gepa.py`). We seed the `classify` and `draft` predictors with the *deliberately-broken baseline* instructions, then let GEPA evolve them. The contract is the load-bearing detail (the itemized-feedback discipline from *The LLM-judge problem*): the metric returns `dspy.Prediction(score, feedback)` where the **feedback string** - assembled from concrete CLEAR-S scorer details (the phantom IDs, the overclaims, the cited-but-unverified refs) - is the gradient the reflection LM reads. Task rollouts run on a cheap model (Gemini Flash); the reflection LM is a stronger model; the data split is train = SOC 2[:16], with ISO 27001 (20) as GEPA's Pareto-tracking validation set (the set it selects candidates against during the run, not a held-out set) and a SOC 2 tail GEPA never sees as the true held-out. Budget matters more than people expect: a few hundred metric calls is the floor where reflective mutation beats noise - our run used 301.
 
-The honest outcome (run `opt_022418865fbf`, 301 graded metric calls, 5 discovered candidates): **GEPA found no lift this run, and the harness says so.** Reflective mutation explored five candidate rewrites of the `classify` and `draft` instructions; none beat the seed. The winner ties the seed at **0.78 correctness on the ISO 27001 held-out set**, with execution and safety holding at **1.00** - the floor never dropped. The instruction text starts from the broken baseline wording, but it evolves inside a graph that already has the strong retrieval and the propose/verify/finalize scaffold of §8, so the seed already sat near the optimum the scorers can see - there was no gradient left in the wording for reflective mutation to climb. We report that null result truthfully: the `/pareto/[id]` view shows the real candidates clustered without a dominating winner, with no synthetic interpolation and no invented teaching curve. The real improvement in this work was the propose/verify/finalize fix of §8, not the optimizer. An honest harness has to be able to return "nothing here," or its wins mean nothing either. (An earlier version of this harness ran a hand-rolled five-question mutation loop; that was too small to beat noise, and the difference is real `dspy.GEPA` at a real budget - a few hundred metric calls - reporting honestly.)
+The honest outcome (run `opt_022418865fbf`, 301 graded metric calls, 5 discovered candidates): **GEPA found no lift this run, and the harness says so.** Reflective mutation explored five candidate rewrites of the `classify` and `draft` instructions; none beat the seed. The winner ties the seed at **0.78 correctness on the ISO 27001 validation set**, with execution and safety holding at **1.00** - the floor never dropped. The instruction text starts from the broken baseline wording, but it evolves inside a graph that already has the strong retrieval and the propose/verify/finalize scaffold from *Honest trajectories*, so the seed already sat near the optimum the scorers can see - there was no gradient left in the wording for reflective mutation to climb. We report that null result truthfully: the `/pareto/[id]` view shows the real candidates clustered without a dominating winner, with no synthetic interpolation and no invented teaching curve. The real improvement in this work was the propose/verify/finalize fix from *Honest trajectories*, not the optimizer. An honest harness has to be able to return "nothing here," or its wins mean nothing either. (An earlier version of this harness ran a hand-rolled five-question mutation loop; that was too small to beat noise, and the difference is real `dspy.GEPA` at a real budget - a few hundred metric calls - reporting honestly.)
 
-The second-order question, which the literature has not closed on: *does prompt tuning actually generalize, or does it overfit to the scorer suite?* The held-out set is the only thing that answers it, and in our case the answer is visible: the propose/verify/finalize prompt holds its trajectory guarantee on the unseen framework (**1.00**), but the semantic reviewer-accept judge drops from **0.85** on SOC 2 to **0.68** on ISO 27001 - a 17-point fall that the citation checks cannot see and only the held-out judge surfaces. That gap is the honest result, and it is why the held-out set is built first and the optimizer second. A tuning loop without a held-out evaluator will produce candidates that look brilliant on the training golden set and ship broken in production. Plan for this.
+The second-order question, which the literature has not closed on: *does prompt tuning actually generalize, or does it overfit to the scorer suite?* An unseen framework is the only thing that answers it. For the propose/verify/finalize prompt, ISO 27001 was that unseen framework (GEPA later reused it as a Pareto-tracking validation set), and the answer is visible: the prompt holds its trajectory guarantee on it (**1.00**), but the semantic reviewer-accept judge drops from **0.85** on SOC 2 to **0.68** on ISO 27001 - a 17-point fall that the citation checks cannot see and only an unseen-framework judge surfaces. That gap is the honest result, and it is why an unseen framework is built first and the optimizer second. A tuning loop without one will produce candidates that look brilliant on the training golden set and ship broken in production. Plan for this.
 
 ---
 
-## 13. The payoff: catching what naive eval misses - and the Pareto frontier behind it
+## What naive eval misses, and the Pareto frontier behind it
 
-This is the core result, and it is not the chart most people expect. Before the Pareto frontier comes a harder-won and simpler result: **the harness catches failures that a vibe check and a string/citation eval both wave through.** That is floor-raising (§2) made concrete. Three production failures, three eval layers:
+This is the core result, and it is not the chart most people expect. Before the Pareto frontier comes a harder-won and simpler result: **the harness catches failures that a vibe check and a string/citation eval both wave through.** That is floor-raising, in the sense of *Benchmark-maxxer or floor-raiser*, made concrete. Three production failures, three eval layers:
 
 | Failure | Vibe check | String / citation eval | This harness |
 |---|---|---|---|
-| Baseline cites a policy that doesn't exist (cold-open Q89/Q102) | ✓ reads fine | ✓ **1.00** - citation strings well-formed | ✗ **0.05** - verify-before-cite trajectory fails |
+| Baseline cites a policy that doesn't exist (the opening Q89/Q102) | ✓ reads fine | ✓ **1.00** - citation strings well-formed | ✗ **0.05** - verify-before-cite trajectory fails |
 | Tuned prompt evaluated on an unseen framework | ✓ reads fine | ✓ citations resolve | ▲ **overfit flagged** - reviewer-accept 0.85 → 0.68 |
 | Same prompt, swapped model (gemini-2.5 → 2.0-flash) | n/a | ✓ answers read fine | ▲ **flagged** - execution 1.00 → 0.983, one question slips the ordering |
 
-Every number is a real prebaked score (`headline.json`, `detection.json`, `portability.json`). The pattern is the point: the two cheap layers - the ones most teams actually ship with - are blind to all three, because the evidence lives in the *trajectory*, the *held-out judge gap*, and the *cross-model call ordering*, never in the final string. This is the demo's `/detection` view, and it is where the abstract discipline becomes concrete. It is also counterintuitive enough to stick: the tuned agent a string-eval would happily promote is the one the held-out judge flags for overfit, and a routine model-version bump - not a worse model - is what slips the verify-before-cite ordering.
+Every number is a real prebaked score (`headline.json`, `detection.json`, `portability.json`). The pattern is the point: the two cheap layers - the ones most teams actually ship with - are blind to all three, because the evidence lives in the *trajectory*, the *held-out judge gap*, and the *cross-model call ordering*, never in the final string. This is the harness's `/detection` view, and it is where the abstract discipline becomes concrete. It is also counterintuitive enough to stick: the tuned agent a string-eval would happily promote is the one the held-out judge flags for overfit, and a routine model-version bump - not a worse model - is what slips the verify-before-cite ordering.
 
 <!-- FIGURE 6 -->
-![Figure 6. The detection contrast (the climax figure). Three real production failures across three eval layers; only the harness column catches all three, because the evidence lives outside the final string.](./figures/06-detection-contrast.png)
+![Figure 6. The detection contrast (the central figure). Three real production failures across three eval layers; only the harness column catches all three, because the evidence lives outside the final string.](./figures/06-detection-contrast.png)
 
 > **Image-gen prompt** (replace the placeholder above): "Publication-quality scientific matrix / heatmap-style table figure, clean white background, thin 1px charcoal grid, single muted teal accent (#10b981) reserved for the rightmost column where failures are caught, neutral gray for pass cells, a soft amber for 'flag' cells, no gradients or 3D or drop shadows, flat vector, sans-serif labels, monospace for scores. Three rows (failure scenarios): 'baseline cites a nonexistent policy', 'tuned prompt on an unseen framework', 'same prompt, swapped model'. Three columns: 'Vibe check', 'String / citation eval', 'This harness'. Cells show small status glyphs and scores: row1 = reads-fine / 1.00 / caught 0.05; row2 = reads-fine / citations resolve / flag 0.85→0.68; row3 = n-a / reads fine / flag 1.00→0.983. The harness column visibly highlighted teal. Caption styled like a journal figure. 16:9."
 
-The Pareto frontier is the multi-objective *tool* behind the third row of that table: how you choose, among prompts that all pass the floor, which tradeoff to ship.
+The Pareto frontier is the multi-objective *tool* behind the prompt-choice the table implies: how you choose, among prompts that all pass the floor, which tradeoff to ship.
 
 In a single-objective optimization, you have a winner. In a multi-objective optimization, you have a **Pareto frontier**: the set of points where no other point dominates *on every axis simultaneously*. A point `A` dominates `B` if `A` is at least as good as `B` on every axis and strictly better on at least one. The frontier is everyone who is not dominated.
 
@@ -335,22 +335,22 @@ Why this matters operationally: the frontier is where the *real design choices l
 
 A single scalar collapses the frontier into a single point and loses the information that would let you make those choices. The `/pareto/[id]` visual is a 2D scatter of `correctness × cost` with the frontier highlighted: it gives you a *coordinate system to think in*, not a scoreboard to memorize.
 
-The mechanics in our harness: GEPA produces a set of candidate prompts. For each candidate, we evaluate against the full golden set on all 7 CLEAR-S axes. Dominance is computed across all 7 axes (a candidate is dominated only if another candidate is at least as good on every axis and strictly better on at least one). The frontier *as a mathematical object* lives in 7-D. The UI projects it down to a 2D scatter of `correctness × cost` because two-axis charts are readable and seven-axis charts are not. The dominance computation that determined which candidates made the frontier used all seven. Deploy gating uses all seven too: a candidate that dominates on correctness × cost but regresses on safety still does not ship. The 2D view is a presentation projection, not the truth.
+The mechanics in our harness: GEPA produces a set of candidate prompts. For each candidate, we score it on all 7 CLEAR-S axes against the evaluation set. Dominance is computed across all 7 axes (a candidate is dominated only if another candidate is at least as good on every axis and strictly better on at least one). The frontier *as a mathematical object* lives in 7-D. The UI projects it down to a 2D scatter of `correctness × cost` because two-axis charts are readable and seven-axis charts are not. The dominance computation that determined which candidates made the frontier used all seven. Deploy gating uses all seven too: a candidate that dominates on correctness × cost but regresses on safety still does not ship. The 2D view is a presentation projection, not the truth.
 
-We highlight the *winner*, the point that maximizes a configurable weighted sum (we use `correctness + 0.25 × execution`). But the frontier itself is the artifact, not the winner. A different customer with a different cost tolerance picks a different point on the frontier.
+When a search does turn up a real spread, you highlight the *winner*, the point that maximizes a configurable weighted sum (we use `correctness + 0.25 × execution`). But even then the frontier itself is the artifact, not the winner: a different customer with a different cost tolerance picks a different point on it.
 
-The honest caveat belongs here: a frontier is only as rich as the search behind it. Our real run (§12) found no candidate that beat the seed, so the scatter is a tight cluster rather than a spread, and there is no dominating winner to ring-highlight. We draw it that way on purpose. A frontier rendered from a search that found nothing is a single point, and pretending otherwise - interpolating a curve, seeding a teaching arc - would be exactly the dishonesty the rest of this article argues against.
+The honest caveat belongs here: a frontier is only as rich as the search behind it. Our real run (*Self-evolving prompts*) found no candidate that beat the seed, so the five candidates plot as a tight cluster around the seed and the non-dominated frontier collapses to that single point. We draw it that way on purpose. Pretending otherwise - interpolating a curve, seeding a teaching arc - would be exactly the dishonesty the rest of this article argues against.
 
 <!-- FIGURE 7 -->
 ![Figure 7. The Pareto view as a coordinate system. Candidate prompts plotted on correctness × cost; the frontier is the set of non-dominated points. In our honest run the candidates cluster near the seed with no dominating winner.](./figures/07-pareto-frontier.png)
 
-> **Image-gen prompt** (replace the placeholder above): "Publication-quality scientific scatter plot, clean white background, thin 1px charcoal axes, single muted teal accent (#10b981) for the non-dominated frontier points and connecting step-line, neutral gray for dominated points, no gradients or 3D or drop shadows, flat vector, sans-serif small-caps axis titles. X axis: cost per question (lower is better, left). Y axis: correctness (higher is better, top). About 6 plotted points clustered tightly in the upper-left near a labeled 'seed' marker, conveying 'no candidate dominated the seed' - not a long sweeping frontier. A faint dashed Pareto step-line through the cluster's upper-left envelope. Small monospace annotation: 'honest null result - search found no lift'. Caption styled like a journal figure. 16:9."
+> **Image-gen prompt** (replace the placeholder above): "Publication-quality scientific scatter plot, clean white background, thin 1px charcoal axes, single muted teal accent (#10b981) for the lone non-dominated point (the seed), neutral gray for the dominated candidate points, no gradients or 3D or drop shadows, flat vector, sans-serif small-caps axis titles. X axis: cost per question (lower is better, left). Y axis: correctness (higher is better, top). Five candidate points clustered tightly in the upper-left around a labeled 'seed' marker, conveying 'no candidate dominated the seed' - not a long sweeping frontier. No frontier line: the non-dominated set is a single point. Small monospace annotation: 'honest null result - search found no lift'. Caption styled like a journal figure. 16:9."
 
-The detection table is where the argument lands; the frontier is the coordinate system that makes the third row actionable. Two honesty rules govern the chart. First, the frontier is only as trustworthy as the eval budget behind it - a frontier drawn from five noisy questions is a Rorschach test, not evidence, which is why §12 reports our real GEPA run truthfully rather than inflating it. Second, the argument is never *our agent definitively beat the baseline*; it is *the harness tells you, honestly, whether it did, and on which axes* - and this run, it tells you the optimizer found nothing. Self-evolving prompts are not magic; they are a search over a frontier, and the frontier is where production decisions live - once the floor in the table above is already held.
+The detection table is where the argument lands; the frontier is the coordinate system that makes the prompt-choice behind it actionable. Two honesty rules govern the chart. First, the frontier is only as trustworthy as the eval budget behind it - a frontier drawn from five noisy questions is a Rorschach test, not evidence, which is why *Self-evolving prompts* reports our real GEPA run truthfully rather than inflating it. Second, the argument is never *our agent definitively beat the baseline*; it is *the harness tells you, honestly, whether it did, and on which axes* - and this run, it tells you the optimizer found nothing. Self-evolving prompts are not magic; they are a search over a frontier, and the frontier is where production decisions live - once the floor in the table above is already held.
 
 ---
 
-## 14. Portability as a deployment gate
+## Portability as a deployment gate
 
 A prompt-and-tool contract is not portable until it has been tested across model/provider combinations under the same decoding and tool-calling settings. We did not expect this gate to matter as much as it does; it became one of the most important checks in our deployment flow.
 
@@ -364,7 +364,7 @@ Our portability gate runs the same prompt against multiple models on the same he
 The gemini-2.0-flash slip is the diagnostic one *precisely because it is small*. This is not a worse model and not a different family - it is a minor version bump within the same family, and one question out of twenty stops calling the verification tool before it writes its answer. In the span tree that single question shows `finalize_span.start_time < verify_span.start_time`; the policy-exists tool still fires, but too late to constrain the answer. A gate that scored only the final string would not see it: the citations look fine and the answer reads well. Only the ordering check catches it. The lesson is narrow but load-bearing: this is one prompt × one model × one decoding setting on one date. We are not making a general claim about either Gemini version. We are making a specific, dated claim about *this contract*. The portability gate is what turns a one-line generalization into a specific diagnostic.
 
 <!-- FIGURE 8 -->
-![Figure 8. Portability sweep: the same prompt across models on the held-out set. Six axes hold on the version bump; only the execution axis moves, and the gate flags it.](./figures/08-portability-sweep.png)
+![Figure 8. Portability sweep: the same prompt across models on the held-out set. The other axes hold on the version bump; only the execution axis regresses, and the gate flags it.](./figures/08-portability-sweep.png)
 
 > **Image-gen prompt** (replace the placeholder above): "Publication-quality scientific grouped bar chart, clean white background, thin 1px charcoal axes, single muted teal accent (#10b981) for the axis that holds and a soft amber bar for the one that slips, no gradients or 3D or drop shadows, flat vector, sans-serif small-caps labels, monospace for model names and scores. Two model groups: gemini-2.5-flash and gemini-2.0-flash. Within each group, seven thin bars for the CLEAR-S axes (correctness, latency, execution, adherence, relevance, safety, cost), all near 1.0. The only visible difference: the EXECUTION bar for gemini-2.0-flash dips slightly to 0.983 and is amber, annotated 'one question slips the ordering'. Caption styled like a journal figure. 16:9."
 
@@ -374,7 +374,7 @@ The connection to Hylak's *collapse of harnesses* section is worth flagging. As 
 
 ---
 
-## 15. Production: Stumbles → Issues → Signals → Experiments
+## Production: stumbles, issues, signals, experiments
 
 Hylak's four-stage model for scaling production review by traffic volume is the cleanest articulation of post-launch eval discipline. We reproduce his vocabulary because his vocabulary is correct:
 
@@ -387,15 +387,15 @@ The mistake every team makes: jumping to stage 4 before they have done stage 1. 
 
 Hylak's blunter framing: *"Plan for 10–20% of agent development time devoted to evaluation and monitoring."* This is roughly the same fraction good software teams spend on testing and observability. The teams that try to spend 2% and ship faster pay the difference in production incidents, and the production incidents cost more than the eval time would have. This is not a moral claim. It is an arithmetic claim about defect costs.
 
-This article does not dwell on stages 3 and 4 because the harness is a pre-production tool. But the architecture supports them: the same MLflow scorers that ran in offline eval run in production with `mlflow.genai.evaluate(model=...)` against live traces; the same store collects production failures and feeds them into the golden set (SQLite in the demo for portability; in a real production deployment this boundary should be a durable event store, a warehouse table, or a managed trace backend); and the same DSPy + GEPA loop can be re-run on a quarterly cadence to refresh the prompt against the latest production failure distribution.
+This article does not dwell on stages 3 and 4 because the harness is a pre-production tool. But the architecture supports them: the same MLflow scorers that ran in offline eval run in production with `mlflow.genai.evaluate(model=...)` against live traces; the same store collects production failures and feeds them into the golden set (SQLite here for portability; in a real production deployment this boundary should be a durable event store, a warehouse table, or a managed trace backend); and the same DSPy + GEPA loop can be re-run on a quarterly cadence to refresh the prompt against the latest production failure distribution.
 
 The right way to think about the architecture: *offline and production are the same pipeline running on different data sources*. Any production-critical scorer should have an offline equivalent, and any offline gate should state whether it is also monitored live. Some offline evals are intentionally expensive, adversarial, or synthetic and should *not* run on live traffic. The architecture should make that decision explicit, not accidental. Anything in production that is not also reproducible in offline is unreviewable.
 
 ---
 
-## 16. The collapse of the harness
+## The collapse of the harness
 
-A note on placement: the detection contrast in §13 - what each eval layer catches - is the climax, with the Pareto frontier as the coordinate system behind it. What follows here, Hylak's closing argument about the harness collapsing into the model, is a second beat, not a louder one. It earns its own section because it changes what eval will look like in 18 months, and a reader who skips it will be surprised by the next generation of agent systems.
+The detection contrast in *What naive eval misses* - what each eval layer catches - is the result this article is built around, with the Pareto frontier as the coordinate system behind it. Hylak's argument about the harness collapsing into the model is a quieter, forward-looking coda. It earns its own section because it changes what eval will look like in 18 months, and a reader who skips it will be surprised by the next generation of agent systems.
 
 Today, agents are *agent SDKs calling models*. The harness is visible. Tool calls happen at the framework boundary; we can intercept them, log them, score them, replay them. The MLflow span tree exists because the framework code is the thing emitting spans.
 
@@ -414,11 +414,11 @@ This harness deliberately lives in the *current* world: the world where the fram
 
 ---
 
-## 17. Second-order close: what we still don't know
+## What we still don't know
 
 The honest close is the set of questions this harness still does not answer:
 
-**What we know.** Tracing first. Multi-axis scoring. Layered scorers. Honest trajectories via propose/verify/finalize. LLM judges with itemized rubrics and human calibration. Failure clustering and slice lift. Self-evolving prompts via reflective mutation. Pareto selection over weighted sums. Portability gates across model families. Production loops scaled by traffic volume.
+**What we know.** Tracing first. Multi-axis scoring. Layered scorers. Honest trajectories via propose/verify/finalize. LLM judges with itemized rubrics and human calibration. Failure clustering and slice lift. Reflective-mutation prompt search (DSPy and GEPA) that reports null results honestly when the search finds no lift, as ours did. Multi-objective Pareto selection as the frame for tradeoffs. Portability gates across model families. Production loops scaled by traffic volume.
 
 **What we suspect but cannot prove.** That the propose/verify/finalize pattern generalizes to most agent domains where a deterministic verifier exists. That GEPA-style reflective mutation will become the default optimization technique in 2027, replacing hand-tuning. That CLEAR-S-style multi-axis scoring will be table stakes within a year, and the teams shipping single-scalar dashboards will look obviously wrong in retrospect.
 
@@ -464,47 +464,43 @@ In order of appearance.
 
 ## Appendix B: The harness - what to read, where to look
 
-The repository is organized so that each section of this article maps to a directory.
+Where each part of the harness lives:
 
 ```
 core/
-  llm/           - gateway, OpenRouter + Gemini dual-provider routing (§4, §14)
-  tracing/       - MLflow span types, manual span helpers (§4)
-  scorers/       - layer1_deterministic, layer2_semantic (judge), layer3_trajectory, layer4_safety (§5, §6)
-  eval/          - runner, EvalRunSummary, golden set loaders (§4)
-  clusters/      - failure clustering by (axis, scorer) (§9)
-  optimizer/     - DSPy + GEPA reflective mutation, Pareto ranking (§12, §13)
-  store/         - SQLite + SQLAlchemy: EvalRun, Trace, Score, Cluster, OptRun (§4, §15)
+  llm/           - gateway, OpenRouter + Gemini dual-provider routing
+  tracing/       - MLflow span types, manual span helpers
+  scorers/       - layer1_deterministic, layer2_semantic (judge), layer3_trajectory, layer4_safety
+  eval/          - runner, EvalRunSummary, golden set loaders
+  clusters/      - failure clustering by (axis, scorer)
+  optimizer/     - DSPy + GEPA reflective mutation, Pareto ranking
+  store/         - SQLite + SQLAlchemy: EvalRun, Trace, Score, Cluster, OptRun
 
 examples/quill/  - the security-questionnaire agent
-  graph.py       - LangGraph DAG, propose/verify/finalize drafter (§8)
+  graph.py       - LangGraph DAG, propose/verify/finalize drafter
   prompts/       - baseline.py (the bad agent), tuned.py (the propose/verify/finalize agent)
-  retrieval.py   - FAISS + sentence-transformers (§3)
-  tools.py       - policy_exists_check, framework_clause_resolves (§8, §11)
+  retrieval.py   - FAISS + sentence-transformers
+  tools.py       - policy_exists_check, framework_clause_resolves
   seed_corpus.py - the 30-policy corpus, the bait past-responses, the injection set
   golden/        - soc2.jsonl (20), iso27001_holdout.jsonl (20), injection.jsonl (10)
-  prebaked/      - headline.json, detection.json, portability.json (§13, §14)
+  prebaked/      - headline.json, detection.json, portability.json
 
 api/             - FastAPI routes: /runs /traces /clusters /detection /pareto /prompt-diff /portability
-ui/              - Next.js 15 + Tailwind, DetectionContrast on /detection + ParetoChart on /pareto/[id] (§13)
-
-docs/
-  deck/                  - the slide deck (HTML + one-per-page PDF)
-  Companion_Article.md   - this article
+ui/              - Next.js 15 + Tailwind, DetectionContrast on /detection + ParetoChart on /pareto/[id]
 ```
 
-Demo URLs (read-only, prebaked):
+Read-only, prebaked views:
 
-- `/detection` - **the climax**: what each eval layer sees (vibe / string / this harness), every cell a real number (§13)
+- `/detection` - the core view: what each eval layer sees (vibe / string / this harness), every cell a real number
 - `/runs/run_cold_open_demo` - Q89 + Q102 with `LiePanel`, and the same detection contrast embedded
-- `/pareto/opt_022418865fbf` - the real `dspy.GEPA` run (301 metric calls, 5 candidates; an honest null result - no candidate beat the seed, execution and safety hold at 1.00 - see §12)
+- `/pareto/opt_022418865fbf` - the real `dspy.GEPA` run (301 metric calls, 5 candidates; an honest null result, no candidate beat the seed, execution and safety hold at 1.00)
 - `/portability` - the multi-model gate; gemini-2.0-flash slips the execution axis (1.00 → 0.983) and is flagged
 
-The demo path is fully offline-reproducible. No live LLM calls required.
+Everything is fully offline-reproducible. No live LLM calls required.
 
 ---
 
-*Praneeth Paikray, Bangalore, May 2026. Adapted from "Journey of an Agent: From Demo to Production."*
+*Praneeth Paikray, Bangalore, 2026.*
 
 ---
 
