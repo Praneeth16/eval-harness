@@ -18,11 +18,11 @@ The agent here is **Quill**: a LangGraph security-questionnaire responder over a
 
 **Takeaways**
 
-- **MLflow tracing and a trajectory scorer catch agent hallucinations that string and citation evals miss.** A fabricated SOC 2 citation passes a vibe check and a well-formed-string eval; the proof that it is fake lives in the tool-call ordering, not the final text.
-- **CLEAR-S scores the agent on seven axes (correctness, latency, execution, adherence, relevance, safety, cost) and stacks deterministic, trajectory, and LLM-judge scorers, then gates on an unseen ISO 27001 set** so no regression hides in an average. On Databricks the same loop runs on managed MLflow and Unity Catalog, with lineage across traces, golden sets, and scores.
-- **DSPy and GEPA reflectively rewrite prompts, but our run found no lift.** The real fix was architectural, a verify-before-cite scaffold, and an honest harness reports that null result instead of manufacturing a Pareto win.
+- **A good final answer is not proof that an agent worked.** The failure often lives in the trace: which tools it called, what evidence it used, and whether it invented a citation along the way.
+- **We need evals that test behavior, not just wording.** CLEAR-S combines deterministic checks, trace-aware scoring, and LLM judges across correctness, safety, latency, cost, and retrieval quality.
+- **Self-improvement is useful, but it is not magic.** DSPy and GEPA tried to improve the prompts; in this run, the bigger win came from changing the agent architecture so it had to verify evidence before citing it.
 
-Code, traces, and prebaked artifacts: [github.com/Praneeth16/eval-harness](https://github.com/Praneeth16/eval-harness).
+The same pattern runs locally with prebaked artifacts, or on Databricks with managed MLflow, Unity Catalog lineage, golden sets, and production-scale trace evaluation.
 
 ---
 
