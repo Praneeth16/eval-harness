@@ -79,7 +79,7 @@ We ran all of this on Databricks, and for this kind of agent that is an architec
 
 The reason the seams matter is the audit. For a compliance agent the eval evidence is regulated data in its own right, and on Databricks the corpus, the retrieval index, the model endpoint, the trace, and the score live under one governance model, in one workspace, behind one set of permissions. The parts run anywhere, individually. But assemble them from a warehouse plus a bolt-on vector database plus an external trace-and-eval service plus a separate model gateway, and every seam between two products becomes a governance boundary your proof-of-correctness has to cross. The trace that proves the agent verified a control would sit in a different system from the control it verified, governed by different rules, exportable by different people. That is the gap an auditor will ask about, and closing it is what the platform buys you that a pile of individually-compatible components does not.
 
-<!-- FIGURE 3 (rendered: docs/figures/make_figures.py) -->
+<!-- FIGURE 3 (SVG authored by Claude Fable 5 on Databricks FMAPI: docs/figures/gen_fable_figures.py) -->
 ![Figure 3. The harness as one governed system on Databricks. NIST SP 800-53 lands in Unity Catalog Delta tables; Databricks AI Search indexes the corpus; the LangGraph agent drafts through Foundation Model API endpoints; managed MLflow captures every trace and CLEAR-S score; DSPy and GEPA optimize on a Job. A dashed enclosure marks the point: Unity Catalog governs all of it under one permission model, and production failures feed back into the golden set.](./figures/fig3_architecture.png)
 
 ---
@@ -107,7 +107,7 @@ A note on what twenty questions can and cannot tell you. The structural rows are
 
 There is a second lesson hiding in the judge row, and it is about your data, not your agent. Both judge scores are low (0.4 to 0.6) because a generic government catalog like NIST 800-53 does not contain our company's specific evidence: the exact encryption standard, the 90-day key rotation, the named on-call process. The gold answers do. So no answer fully matches, and the judge marks everyone down. The harness surfaces that instead of hiding it: *a retrieval corpus has to actually contain your evidence*, and when it does not, the judge axis is the one that tells you.
 
-<!-- FIGURE 4 (rendered: docs/figures/make_figures.py) -->
+<!-- FIGURE 4 (SVG authored by Claude Fable 5 on Databricks FMAPI: docs/figures/gen_fable_figures.py) -->
 ![Figure 4. The scorers run cheapest first, and each layer is blind to a different failure. An unverified citation passes the deterministic layer cleanly, because the control it names is real, and dies at the trajectory layer, which sees the verifier never ran. The expensive judge and safety layers never have to be spent on it.](./figures/fig4_scorer_funnel.png)
 
 The pattern generalizes: wherever you can write a deterministic verifier, write one and hand it to the model as a tool, a takeaway Teresa Torres lands on from a very different domain [[4]](#references). The model is creative but inconsistent; the verifier is rigid but reliable; the loop gives you creativity bounded by correctness.
@@ -153,7 +153,7 @@ The sweep confirmed the agent ports cleanly to a different model family. Verify-
 
 Trace before you eval, because you cannot grade logic you cannot see. Stack eval layers, deterministic for constraints, trajectory for logic, judge for tone. Optimize the tail, not the mean, because failures concentrate in the worst few percent of runs, and those are the runs customers remember. We built CI for code; agents need CI for behavior, and this harness is that CI: trace, score, cluster the failures, attempt to optimize, gate on an unseen set, ship, and feed every production failure back to the front of the loop.
 
-<!-- FIGURE 5 (rendered: docs/figures/make_figures.py) -->
+<!-- FIGURE 5 (SVG authored by Claude Fable 5 on Databricks FMAPI: docs/figures/gen_fable_figures.py) -->
 ![Figure 5. The loop as one governed surface on Databricks. Each stage maps to a managed service, and the arrow back from monitoring is the point: a production failure re-enters as the next regression case instead of disappearing into a log.](./figures/fig5_loop.png)
 
 On Databricks, tracing, eval, governance, the optimizer loop, and the model gateway are one surface with lineage across all of it, which is the difference between a harness that demos and one a regulated team can run, audit, and stand behind when someone asks where a number came from. The full Databricks-native run in this article, data load to retrieval to agent to CLEAR-S to GEPA, is one notebook in the repository.

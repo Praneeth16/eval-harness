@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <marker id="arrowGray" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12"
+            viewBox="0 0 10 10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa5b1"/>
+    </marker>
+    <marker id="arrowTeal" markerUnits="userSpaceOnUse" markerWidth="15" markerHeight="15"
+            viewBox="0 0 10 10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#10b981"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+
+  <!-- Title and subtitle -->
+  <text x="60" y="56" font-family="Charter, Georgia, serif" font-size="34" font-weight="bold" fill="#1f2933">CI for agent behavior</text>
+  <text x="60" y="92" font-family="Charter, Georgia, serif" font-size="17" fill="#1f2933">Seven stages, one governed surface. The arrow back from monitor is the point: a production failure re-enters as a regression case.</text>
+
+  <!-- Gray cycle arrows -->
+  <path d="M 960.7 244.2 A 520 290 0 0 1 1086.5 278.0" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+  <path d="M 1286.9 418.1 A 520 290 0 0 1 1317.9 494.0" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+  <path d="M 1246.4 668.7 A 520 290 0 0 1 1172.2 722.5" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+  <path d="M 869.8 807.4 A 520 290 0 0 1 730.2 807.4" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+  <path d="M 427.8 722.5 A 520 290 0 0 1 353.6 668.7" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+  <path d="M 282.1 494.0 A 520 290 0 0 1 313.1 418.1" fill="none" stroke="#9aa5b1" stroke-width="1.75" marker-end="url(#arrowGray)"/>
+
+  <!-- Teal feedback arrow: monitor -> trace -->
+  <path d="M 513.5 278.0 A 520 290 0 0 1 639.3 244.2" fill="none" stroke="#10b981" stroke-width="3" marker-end="url(#arrowTeal)"/>
+  <text x="565" y="198" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="16" font-style="italic" fill="#10b981">production failures become</text>
+  <text x="565" y="220" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="16" font-style="italic" fill="#10b981">tomorrow's regression cases</text>
+
+  <!-- 1. trace (top) -->
+  <rect x="680" y="191" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="800" y="225" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">trace</text>
+  <text x="800" y="250" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">managed MLflow tracing</text>
+
+  <!-- 2. score -->
+  <rect x="1086" y="300" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="1206" y="334" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">score</text>
+  <text x="1206" y="359" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">genai.evaluate &#183; CLEAR-S</text>
+
+  <!-- 3. cluster failures -->
+  <rect x="1187" y="546" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="1307" y="580" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">cluster failures</text>
+  <text x="1307" y="605" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">judge feedback &#183; MLflow</text>
+
+  <!-- 4. optimize -->
+  <rect x="906" y="742" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="1026" y="776" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">optimize</text>
+  <text x="1026" y="801" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">DSPy + GEPA on a Job</text>
+
+  <!-- 5. gate -->
+  <rect x="454" y="742" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="574" y="776" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">gate</text>
+  <text x="574" y="801" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">held-out, never tuned on</text>
+
+  <!-- 6. ship -->
+  <rect x="173" y="546" width="240" height="78" rx="10" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+  <text x="293" y="580" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#1f2933">ship</text>
+  <text x="293" y="605" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">Model Serving</text>
+
+  <!-- 7. monitor (teal) -->
+  <rect x="273" y="300" width="240" height="78" rx="10" fill="#ffffff" stroke="#10b981" stroke-width="2"/>
+  <text x="393" y="334" text-anchor="middle" font-family="Charter, Georgia, serif" font-size="19" font-weight="bold" fill="#10b981">monitor</text>
+  <text x="393" y="359" text-anchor="middle" font-family="'SF Mono', Menlo, monospace" font-size="12.5" fill="#9aa5b1">inference tables</text>
+</svg>

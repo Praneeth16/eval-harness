@@ -8,12 +8,9 @@ muted-teal accent, flat vector look):
                          verifies before it cites. Difference is ordering.
   fig2_clears_radar.png — CLEAR-S across the six axes scored on the run,
                           baseline vs the propose/verify/finalize fix.
-  fig3_architecture.png — the harness as one governed system on Databricks,
-                          with the Unity Catalog boundary enclosing every node.
-  fig4_scorer_funnel.png — the layered scorers, cheapest first; the unverified
-                           citation passes the cheap layer and dies at the trace.
-  fig5_loop.png         — CI for agent behavior: the seven-stage loop with the
-                          production-failure feedback arrow.
+
+Figures 3-5 (architecture, scorer funnel, loop) are authored as SVG by Claude
+Fable 5 on Databricks FMAPI: see gen_fable_figures.py.
 
 Numbers come from the Databricks run logged to the `eval_harness_journey_mlflow`
 experiment (gemini-2.5-flash, 20 SOC 2 questions over NIST SP 800-53).
@@ -205,209 +202,6 @@ def clears_radar() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Figure 3 — one governed system on Databricks
-# ─────────────────────────────────────────────────────────────────────────
-
-def _node(ax, x, y, w, h, title, sub="", *, edge=INK, face="white", lw=1.4,
-          title_color=None, sub_color=GRAY):
-    ax.add_patch(FancyBboxPatch((x, y), w, h,
-                 boxstyle="round,pad=0.02,rounding_size=0.08",
-                 linewidth=lw, edgecolor=edge, facecolor=face))
-    cy = y + h / 2
-    if sub:
-        ax.text(x + w / 2, cy + 0.22, title, ha="center", va="center",
-                fontsize=12.5, fontweight="bold", color=title_color or INK)
-        ax.text(x + w / 2, cy - 0.28, sub, ha="center", va="center",
-                fontsize=9.5, color=sub_color, **MONO)
-    else:
-        ax.text(x + w / 2, cy, title, ha="center", va="center",
-                fontsize=12.5, fontweight="bold", color=title_color or INK)
-
-
-def _flow(ax, x0, y0, x1, y1, *, color=GRAY, rad=0.0, lw=1.3, style="-|>"):
-    ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle=style,
-                 mutation_scale=14, linewidth=lw, color=color,
-                 connectionstyle=f"arc3,rad={rad}"))
-
-
-def architecture() -> None:
-    fig, ax = plt.subplots(figsize=(16, 9))
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.04)
-    ax.set_xlim(0, 16)
-    ax.set_ylim(0, 9)
-    ax.axis("off")
-
-    fig.suptitle("One governed system, not a stitch-job", x=0.03, ha="left",
-                 fontsize=26, fontweight="bold", color=INK)
-    fig.text(0.03, 0.89,
-             "Every component of the eval loop, and every piece of eval evidence, "
-             "sits inside the same Unity Catalog permission boundary.",
-             ha="left", fontsize=14, color=INK)
-
-    # governed boundary
-    ax.add_patch(FancyBboxPatch((0.4, 0.9), 15.2, 6.9,
-                 boxstyle="round,pad=0.02,rounding_size=0.25",
-                 linewidth=1.8, edgecolor=TEAL, facecolor="none",
-                 linestyle=(0, (6, 4))))
-    ax.text(0.75, 7.45, "Unity Catalog  ·  governance + lineage", fontsize=13,
-            fontweight="bold", color=TEAL)
-    ax.text(15.4, 1.12, "one permission model, one governed boundary",
-            ha="right", fontsize=10, color=TEAL, **MONO)
-
-    row = 4.5
-    _node(ax, 0.9, row, 2.0, 1.5, "NIST SP\n800-53 Rev5", "public catalog", edge=GRAY)
-    _flow(ax, 2.9, row + 0.75, 3.5, row + 0.75)
-    _node(ax, 3.5, row, 2.3, 1.5, "Delta tables", "corpus · golden")
-    _flow(ax, 5.8, row + 0.75, 6.4, row + 0.75)
-    _node(ax, 6.4, row, 2.6, 1.5, "AI Search", "Delta Sync · gte-large-en")
-    _flow(ax, 9.0, row + 0.75, 9.6, row + 0.75)
-    _node(ax, 9.6, row, 2.8, 1.5, "LangGraph agent",
-          "parse·classify·retrieve\npropose·verify·finalize", lw=1.8)
-    _flow(ax, 12.4, row + 0.75, 13.0, row + 0.75)
-    _node(ax, 13.0, row, 2.3, 1.5, "Managed\nMLflow", "traces + CLEAR-S")
-
-    # model gateway above the agent
-    _node(ax, 9.1, 6.3, 3.8, 1.1, "Foundation Model APIs",
-          "Claude · GPT · Gemini · Llama · Qwen", edge=GRAY)
-    _flow(ax, 11.0, 6.3, 11.0, row + 1.5, style="<|-|>")
-
-    # optimizer below MLflow
-    _node(ax, 12.6, 2.0, 3.1, 1.3, "DSPy + GEPA", "optimizer · runs as a Job", edge=GRAY)
-    _flow(ax, 14.15, row, 14.15, 3.3)
-
-    # feedback to the golden set, routed below the main row
-    _flow(ax, 12.6, 2.45, 4.65, row, color=TEAL, rad=-0.18, lw=1.8)
-    ax.text(7.6, 1.55, "production failures become regression cases",
-            ha="center", fontsize=11.5, color=TEAL, style="italic")
-
-    fig.text(0.03, 0.015,
-             "Assembled from separate products, every seam between two of these "
-             "boxes is a governance boundary the eval evidence has to cross.",
-             ha="left", fontsize=11.5, color=GRAY)
-    fig.savefig(OUT / "fig3_architecture.png", facecolor="white")
-    plt.close(fig)
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 4 — scorer funnel, cheapest first
-# ─────────────────────────────────────────────────────────────────────────
-
-def scorer_funnel() -> None:
-    fig, ax = plt.subplots(figsize=(16, 9))
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.84, bottom=0.05)
-    ax.set_xlim(0, 16)
-    ax.set_ylim(0, 9)
-    ax.axis("off")
-
-    fig.suptitle("Each scorer layer is blind to a different failure", x=0.03,
-                 ha="left", fontsize=26, fontweight="bold", color=INK)
-    fig.text(0.03, 0.885,
-             "The layers run cheapest first. The unverified citation looks perfect "
-             "to the cheapest layer; only the trace catches it.",
-             ha="left", fontsize=14, color=INK)
-
-    layers = [
-        ("1 · Deterministic checks", "milliseconds · format, budget, ID resolves",
-         GRAY, "white"),
-        ("2 · Trajectory checks", "the trace · was every citation verified?",
-         TEAL, "#e7f8f1"),
-        ("3 · LLM judge", "does the control support the claim?", LIGHT, "white"),
-        ("4 · Safety", "injection, PII, refusal", LIGHT, "white"),
-    ]
-    y = 6.0
-    for title, sub, edge, face in layers:
-        dead = edge is LIGHT
-        ax.add_patch(FancyBboxPatch((4.2, y), 7.6, 1.25,
-                     boxstyle="round,pad=0.02,rounding_size=0.08",
-                     linewidth=2.0 if edge is TEAL else 1.4,
-                     edgecolor=edge, facecolor=face))
-        ax.text(8.0, y + 0.85, title, ha="center", fontsize=13.5,
-                fontweight="bold", color=LIGHT if dead else (TEAL if edge is TEAL else INK))
-        ax.text(8.0, y + 0.38, sub, ha="center", fontsize=10,
-                color=LIGHT if dead else GRAY, **MONO)
-        y -= 1.75
-
-    # the token's path
-    ax.text(2.4, 7.9, "cites SC-7,\nnever verified", ha="center", fontsize=12,
-            color=AMBER, fontweight="bold", **MONO)
-    _flow(ax, 2.4, 7.55, 2.4, 6.65, color=AMBER, lw=1.6)
-    _flow(ax, 2.4, 6.6, 4.2, 6.6, color=AMBER, lw=1.6)
-    ax.text(12.2, 6.6, "passes · well-formed,\ncontrol resolves", va="center",
-            fontsize=11, color=AMBER, style="italic")
-    _flow(ax, 2.4, 6.6, 2.4, 4.85, color=AMBER, lw=1.6)
-    _flow(ax, 2.4, 4.85, 4.2, 4.85, color=AMBER, lw=1.6)
-    ax.text(2.4, 4.45, "×", ha="center", fontsize=22, color=TEAL, fontweight="bold")
-    ax.text(12.2, 4.85, "stopped · the verifier\nnever ran", va="center",
-            fontsize=11, color=TEAL, fontweight="bold", style="italic")
-    ax.text(12.2, 2.6, "never reached", va="center", fontsize=11,
-            color=LIGHT, style="italic")
-
-    fig.text(0.03, 0.015,
-             "On the NIST run both agents scored 1.00 on layer 1: every cited "
-             "control is real. Only layer 2 separates verified from guessed.",
-             ha="left", fontsize=11.5, color=GRAY)
-    fig.savefig(OUT / "fig4_scorer_funnel.png", facecolor="white")
-    plt.close(fig)
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 5 — CI for agent behavior
-# ─────────────────────────────────────────────────────────────────────────
-
-def loop() -> None:
-    fig, ax = plt.subplots(figsize=(16, 9))
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.04)
-    ax.set_xlim(0, 16)
-    ax.set_ylim(0, 9)
-    ax.axis("off")
-
-    fig.suptitle("CI for agent behavior", x=0.03, ha="left",
-                 fontsize=26, fontweight="bold", color=INK)
-    fig.text(0.03, 0.89,
-             "Seven stages, one governed surface. The arrow back from monitor is "
-             "the point: a production failure re-enters as a regression case.",
-             ha="left", fontsize=14, color=INK)
-
-    stages = [
-        ("trace", "managed MLflow tracing"),
-        ("score", "genai.evaluate · CLEAR-S"),
-        ("cluster failures", "judge feedback · MLflow"),
-        ("optimize", "DSPy + GEPA on a Job"),
-        ("gate", "held-out, never tuned on"),
-        ("ship", "Model Serving"),
-        ("monitor", "inference tables"),
-    ]
-    n = len(stages)
-    cx, cy, rx, ry = 8.0, 3.9, 6.0, 2.8
-    pts = []
-    for i in range(n):
-        a = np.pi / 2 - 2 * np.pi * i / n
-        pts.append((cx + rx * np.cos(a), cy + ry * np.sin(a)))
-
-    for i, ((x, y), (title, sub)) in enumerate(zip(pts, stages)):
-        last = i == n - 1
-        _node(ax, x - 1.45, y - 0.62, 2.9, 1.24, title, sub,
-              edge=TEAL if last else INK, lw=1.8 if last else 1.4,
-              title_color=TEAL if last else INK)
-
-    for i in range(n - 1):
-        (x0, y0), (x1, y1) = pts[i], pts[i + 1]
-        dx, dy = x1 - x0, y1 - y0
-        d = (dx ** 2 + dy ** 2) ** 0.5
-        pad = 1.55
-        _flow(ax, x0 + dx / d * pad, y0 + dy / d * pad,
-              x1 - dx / d * pad, y1 - dy / d * pad, rad=-0.12)
-
-    (x0, y0), (x1, y1) = pts[-1], pts[0]
-    _flow(ax, x0 + 0.4, y0 + 0.7, x1 - 1.2, y1 - 0.35, color=TEAL, rad=-0.3, lw=2.0)
-    ax.text(4.7, 7.65, "production failures become\ntomorrow's regression cases",
-            ha="center", fontsize=11.5, color=TEAL, style="italic")
-
-    fig.savefig(OUT / "fig5_loop.png", facecolor="white")
-    plt.close(fig)
-
-
-# ─────────────────────────────────────────────────────────────────────────
 # Table figures — Medium cannot render markdown tables, so each table in the
 # article ships as an image in the same house style.
 # ─────────────────────────────────────────────────────────────────────────
@@ -549,12 +343,8 @@ def tables() -> None:
 if __name__ == "__main__":
     two_traces()
     clears_radar()
-    architecture()
-    scorer_funnel()
-    loop()
     tables()
     for f in ("fig1_two_traces.png", "fig2_clears_radar.png",
-              "fig3_architecture.png", "fig4_scorer_funnel.png", "fig5_loop.png",
               "tbl1_fix.png", "tbl2_transfer.png", "tbl3_models.png",
               "tbl4_datasets.png", "tbl5_services.png"):
         print("wrote", OUT / f)
