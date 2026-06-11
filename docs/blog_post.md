@@ -74,14 +74,8 @@ The scorers run in layers, cheapest first, because no single scorer is complete.
 
 We ran all of this on Databricks, and for this kind of agent that is an architecture decision, not a hosting one. Each piece of the harness maps to a managed service, and each mapping closes a governance seam:
 
-| Harness piece | Databricks service | What the mapping buys |
-|---|---|---|
-| Corpus and golden sets | Unity Catalog Delta tables | Eval data carries the same permissions and lineage as production data |
-| Retrieval | Databricks AI Search (formerly Mosaic AI Vector Search): a Delta Sync index with managed `databricks-gte-large-en` embeddings | The index derives from the governed table instead of living as a separately-secured copy in an outside vector store |
-| Drafting and judging models | Foundation Model APIs (`databricks-gemini-2-5-flash` drafts; a second endpoint judges) | Control text never leaves the platform for an external API key |
-| Model choice | The same endpoint gateway, fronting Anthropic, OpenAI, and Google frontier models alongside open-weight Qwen and Llama | Swap models per task without rewriting the agent or shipping the corpus to a new vendor; the portability sweep below is exactly that swap, run as an experiment |
-| Traces and scores | Managed MLflow | Every run records the model endpoint, dataset, and variant next to its CLEAR-S scores, so a score carries the context that produced it |
-| Orchestration | A Job | The whole run, data load to GEPA, reproduces as one notebook |
+<!-- TABLE 5 as image, Medium cannot render markdown tables (rendered: docs/figures/make_figures.py) -->
+![Table. Each harness piece maps to a managed Databricks service. Corpus and golden sets: Unity Catalog Delta tables, so eval data carries the same permissions and lineage as production data. Retrieval: Databricks AI Search, formerly Mosaic AI Vector Search, a Delta Sync index with managed databricks-gte-large-en embeddings, derived from the governed table instead of copied to an outside vector store. Drafting and judging: Foundation Model APIs, databricks-gemini-2-5-flash drafts and a second endpoint judges, so control text never leaves the platform. Model choice: the same gateway fronts Anthropic, OpenAI, and Google frontier models alongside open-weight Qwen and Llama, so a team swaps models without rewriting the agent; the portability sweep below is exactly that swap, run as an experiment. Traces and scores: managed MLflow, where every run records the model endpoint, dataset, and variant next to its CLEAR-S scores. Orchestration: a Job, so the whole run reproduces as one notebook.](./figures/tbl5_services.png)
 
 The reason the seams matter is the audit. For a compliance agent the eval evidence is regulated data in its own right, and on Databricks the corpus, the retrieval index, the model endpoint, the trace, and the score live under one governance model, in one workspace, behind one set of permissions. The parts run anywhere, individually. But assemble them from a warehouse plus a bolt-on vector database plus an external trace-and-eval service plus a separate model gateway, and every seam between two products becomes a governance boundary your proof-of-correctness has to cross. The trace that proves the agent verified a control would sit in a different system from the control it verified, governed by different rules, exportable by different people. That is the gap an auditor will ask about, and closing it is what the platform buys you that a pile of individually-compatible components does not.
 
@@ -104,13 +98,8 @@ The fix is **propose, verify, finalize**, three phases in Quill's drafter:
 
 Now the trajectory scorer can confirm, from the recorded tool-call trajectory, that every citation carries a verification that returned true, and the structure guarantees the check ran before the answer was written. Here are the measured numbers on the NIST run, 20 questions, scored 0 to 1. One reading note before the table: verify-before-cite is scored as citation coverage. Each answer's score is the fraction of its cited controls that carry a successful verification call, and the table reports the average across the 20 questions.
 
-| CLEAR-S signal | Baseline (single call) | Fixed (propose/verify/finalize) |
-|---|---|---|
-| Verify-before-cite (trajectory) | **0.00** | **0.97** |
-| Citation resolves (deterministic) | 1.00 | 1.00 |
-| Reviewer-accept (judge) | 0.58 | 0.43 |
-| Execution axis | 0.50 | **0.93** |
-| Safety axis | 1.00 | 1.00 |
+<!-- TABLE 1 as image, Medium cannot render markdown tables (rendered: docs/figures/make_figures.py) -->
+![Table. CLEAR-S signals side by side on the NIST run. Verify-before-cite trajectory: baseline 0.00, fixed 0.97. Citation resolves deterministic: 1.00 for both. Reviewer-accept judge: baseline 0.58, fixed 0.43. Execution axis: baseline 0.50, fixed 0.93. Safety axis: 1.00 for both. Average these signals and the regression fades; keep them separate and it is obvious.](./figures/tbl1_fix.png)
 
 Read the first three rows together, because they are the whole argument. The broken agent cited real controls, so the deterministic layer handed it a clean 1.00, and it read perfectly well to a quick reviewer, so the judge gave it 0.58. Yet it ran the verification step on none of its citations, and the trajectory axis says so at 0.00. It was right by luck, with a reckless process underneath. The fixed agent verifies first: 0.97 on the trajectory axis, with one question in the run whose citations never received a successful verification call, the single gap to a perfect score. And because it now refuses to overstate what a control actually says, it reads slightly worse to the same naive judge at 0.43. Score either agent on its output and you ship the dangerous one. Only the trajectory axis tells you which of the two did the work.
 
@@ -129,10 +118,8 @@ The pattern generalizes: wherever you can write a deterministic verifier, write 
 
 The verify-before-cite guarantee is structural, so it should hold on a framework the agent never saw during development. Quill's graph and prompts were built and tuned against SOC 2 questions; we then ran the same fixed agent, untouched, on a held-out ISO 27001 set, re-cited to the same NIST controls.
 
-| CLEAR-S signal | SOC 2 (in-domain) | ISO 27001 (held out) |
-|---|---|---|
-| Verify-before-cite | 0.97 | **1.00** |
-| Reviewer-accept (judge) | 0.43 | 0.38 |
+<!-- TABLE 2 as image, Medium cannot render markdown tables (rendered: docs/figures/make_figures.py) -->
+![Table. CLEAR-S signals across frameworks, same fixed agent untouched. Verify-before-cite: SOC 2 in-domain 0.97, ISO 27001 held out 1.00. Reviewer-accept judge: SOC 2 0.43, ISO 27001 0.38. The structural guarantee transfers; semantic quality does not come free on an unseen framework.](./figures/tbl2_transfer.png)
 
 The process transfers cleanly. On a framework it never saw, the agent verifies before citing just as reliably, a touch better even. What does not transfer for free is semantic quality. The judge slips from 0.43 to 0.38, a gap roughly one answer wide at these sample sizes, so treat the size as approximate; the direction, though, is the expected one. The scaffold removes unverified citations. It does not teach the agent a framework it has never seen. You can only see that gap because ISO 27001 was held out from this comparison. A structural fix buys you a reliable process everywhere. It does not buy you domain knowledge you never gave the agent.
 
@@ -146,11 +133,8 @@ GEPA is a reflective prompt optimizer: it reads failing traces, writes a textual
 
 Three datasets are in play by this point, and the discipline is that they never trade places:
 
-| Set | Job | Does GEPA see it? |
-|---|---|---|
-| SOC 2 development set | Built and tuned the graph and prompts; the in-domain side of the transfer test | Only indirectly: the seed prompt was written against it |
-| ISO 27001, re-cited to NIST controls | Held-out framework for the transfer test, then reused as GEPA's validation set | Yes, as validation |
-| SOC 2 held-out tail | The final gate; the winning candidate is checked here once, at the end | Never |
+<!-- TABLE 3 as image, Medium cannot render markdown tables (rendered: docs/figures/make_figures.py) -->
+![Table. Three datasets and their jobs. SOC 2 development set built and tuned the graph and prompts; GEPA sees it only indirectly through the seed prompt. ISO 27001, re-cited to NIST controls, was the held-out framework for the transfer test, then reused as GEPA's validation set. The SOC 2 held-out tail is the final gate, checked once at the end; GEPA never sees it.](./figures/tbl4_datasets.png)
 
 The set that gates the ship decision is the one nothing upstream ever optimized against.
 
@@ -158,10 +142,8 @@ Here is the lesson. GEPA optimizes prompt *text*. The win in this agent was *arc
 
 The model swap is the other half of the gate. A prompt that works on one model is a model-specific configuration until a portability sweep proves otherwise. We took the fixed Quill and swapped the drafting model from `databricks-gemini-2-5-flash` to `databricks-claude-sonnet-4-6` on the same questions.
 
-| CLEAR-S signal | gemini-2-5-flash | claude-sonnet-4-6 |
-|---|---|---|
-| Verify-before-cite | 0.97 | **1.00** |
-| Reviewer-accept (judge) | 0.43 | 0.53 |
+<!-- TABLE 4 as image, Medium cannot render markdown tables (rendered: docs/figures/make_figures.py) -->
+![Table. CLEAR-S signals across models, same agent and questions. Verify-before-cite: gemini-2-5-flash 0.97, claude-sonnet-4-6 1.00. Reviewer-accept judge: gemini 0.43, claude 0.53. Verify-before-cite holds across model families; the judge moves within noise at this sample size.](./figures/tbl3_models.png)
 
 The sweep confirmed the agent ports cleanly to a different model family. Verify-before-cite held, and the judge moved up as well, 0.43 to 0.53, a lean rather than a verdict at this sample size. The detail worth pausing on is `gemini-2-5-flash` itself, which scored 0.97 rather than 1.00. It is the same gap from the fix table: one question whose citations never received a successful verification call. A string eval sees none of that, since the citations look fine on the page. Only the citation-coverage check in the trajectory layer surfaces one unverified citation set, on one model, on one question. Which is the whole reason to run the sweep: not because the swap always breaks, but because you cannot know whether it did until a process-aware eval tells you.
 

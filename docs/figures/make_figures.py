@@ -407,12 +407,154 @@ def loop() -> None:
     plt.close(fig)
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Table figures — Medium cannot render markdown tables, so each table in the
+# article ships as an image in the same house style.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _table_fig(fname, title, subtitle, cols, rows, widths, *, accents=None,
+               caption="", mono_data=True, align="center", fontsize=13,
+               row_h=0.62, header_color=None):
+    accents = accents or {}
+    n_rows = len(rows)
+    fig_h = 1.7 + (n_rows + 1) * row_h + (0.7 if caption else 0.3)
+    fig, ax = plt.subplots(figsize=(12, fig_h))
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.97, bottom=0.03)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, fig_h)
+    ax.axis("off")
+
+    ax.text(0.5, fig_h - 0.45, title, ha="center", fontsize=21,
+            fontweight="bold", color=INK)
+    ax.text(0.5, fig_h - 0.95, subtitle, ha="center", fontsize=12.5, color=GRAY)
+
+    x_edges = [0.06]
+    for w in widths:
+        x_edges.append(x_edges[-1] + w)
+    top = fig_h - 1.35
+    y_edges = [top - i * row_h for i in range(n_rows + 2)]
+
+    for y in y_edges:
+        ax.plot([x_edges[0], x_edges[-1]], [y, y], color=LIGHT, lw=1.2, zorder=1)
+    ax.plot([x_edges[0], x_edges[-1]], [y_edges[0], y_edges[0]], color=INK, lw=1.4)
+    ax.plot([x_edges[0], x_edges[-1]], [y_edges[1], y_edges[1]], color=INK, lw=1.4)
+    ax.plot([x_edges[0], x_edges[-1]], [y_edges[-1], y_edges[-1]], color=INK, lw=1.4)
+    for x in x_edges:
+        ax.plot([x, x], [y_edges[0], y_edges[-1]], color=LIGHT, lw=1.2)
+
+    for c, lab in enumerate(cols):
+        cx = (x_edges[c] + x_edges[c + 1]) / 2
+        ax.text(cx, (y_edges[0] + y_edges[1]) / 2, lab, ha="center", va="center",
+                fontsize=fontsize, fontweight="bold",
+                color=(header_color or {}).get(c, INK))
+
+    for r, row in enumerate(rows):
+        cy = (y_edges[r + 1] + y_edges[r + 2]) / 2
+        for c, cell in enumerate(row):
+            color = accents.get((r, c), INK if c == 0 else INK)
+            kw = dict(MONO) if (mono_data and c > 0) else {}
+            ha = "left" if (align == "left" or c == 0) else "center"
+            cx = x_edges[c] + 0.015 if ha == "left" else (x_edges[c] + x_edges[c + 1]) / 2
+            ax.text(cx, cy, cell, ha=ha, va="center", fontsize=fontsize - 0.5,
+                    color=color, fontweight="bold" if (r, c) in accents else "normal",
+                    **kw)
+
+    if caption:
+        ax.text(0.5, y_edges[-1] - 0.42, caption, ha="center", fontsize=11,
+                color=GRAY, style="italic")
+    fig.savefig(OUT / fname, facecolor="white")
+    plt.close(fig)
+
+
+def tables() -> None:
+    _table_fig(
+        "tbl1_fix.png",
+        "CLEAR-S signals, side by side",
+        "Baseline single call vs propose/verify/finalize fix · NIST run, 20 questions",
+        ["CLEAR-S signal", "Baseline (single call)", "Fixed (propose/verify/finalize)"],
+        [["Verify-before-cite (trajectory)", "0.00", "0.97"],
+         ["Citation resolves (deterministic)", "1.00", "1.00"],
+         ["Reviewer-accept (judge)", "0.58", "0.43"],
+         ["Execution axis", "0.50", "0.93"],
+         ["Safety axis", "1.00", "1.00"]],
+        [0.40, 0.24, 0.24],
+        accents={(0, 1): AMBER, (0, 2): TEAL, (3, 1): AMBER, (3, 2): TEAL},
+        header_color={2: TEAL},
+        caption="Average these signals and the regression fades. Keep them separate and it is obvious.",
+    )
+    _table_fig(
+        "tbl2_transfer.png",
+        "CLEAR-S signals across frameworks",
+        "SOC 2 in-domain vs ISO 27001 held out · same fixed agent, untouched",
+        ["CLEAR-S signal", "SOC 2 (in-domain)", "ISO 27001 (held out)"],
+        [["Verify-before-cite", "0.97", "1.00"],
+         ["Reviewer-accept (judge)", "0.43", "0.38"]],
+        [0.40, 0.24, 0.24],
+        accents={(0, 2): TEAL},
+        caption="The structural guarantee transfers; semantic quality does not come free on an unseen framework.",
+    )
+    _table_fig(
+        "tbl3_models.png",
+        "CLEAR-S signals across models",
+        "gemini-2-5-flash vs claude-sonnet-4-6 · same agent, same questions",
+        ["CLEAR-S signal", "gemini-2-5-flash", "claude-sonnet-4-6"],
+        [["Verify-before-cite", "0.97", "1.00"],
+         ["Reviewer-accept (judge)", "0.43", "0.53"]],
+        [0.40, 0.24, 0.24],
+        accents={(0, 2): TEAL},
+        caption="Verify-before-cite holds across model families; the judge moves within noise at this sample size.",
+    )
+    _table_fig(
+        "tbl4_datasets.png",
+        "Three datasets, and they never trade places",
+        "What each set is for, and what GEPA is allowed to see",
+        ["Set", "Job", "Does GEPA see it?"],
+        [["SOC 2 development set",
+          "Built and tuned the graph and prompts;\nin-domain side of the transfer test",
+          "Only indirectly: the seed\nprompt was written against it"],
+         ["ISO 27001, re-cited\nto NIST controls",
+          "Held-out framework for the transfer test,\nthen reused as GEPA's validation set",
+          "Yes, as validation"],
+         ["SOC 2 held-out tail",
+          "The final gate; the winning candidate\nis checked here once, at the end",
+          "Never"]],
+        [0.20, 0.38, 0.30],
+        accents={(2, 2): TEAL},
+        caption="The set that gates the ship decision is the one nothing upstream ever optimized against.",
+        mono_data=False, align="left", fontsize=12, row_h=0.95,
+    )
+    _table_fig(
+        "tbl5_services.png",
+        "One harness, one governed surface",
+        "Each piece of the eval loop maps to a managed Databricks service, and each mapping closes a governance seam",
+        ["Harness piece", "Databricks service", "What the mapping buys"],
+        [["Corpus + golden sets", "Unity Catalog Delta tables",
+          "Eval data carries the same permissions\nand lineage as production data"],
+         ["Retrieval", "AI Search (Delta Sync index,\ngte-large-en embeddings)",
+          "The index derives from the governed table,\nnot a copy in an outside vector store"],
+         ["Drafting + judging", "Foundation Model APIs\n(gemini-2-5-flash drafts; a second judges)",
+          "Control text never leaves the platform\nfor an external API key"],
+         ["Model choice", "The same gateway: Claude, GPT,\nGemini, Llama, Qwen behind one interface",
+          "Swap models per task without rewriting\nthe agent or moving the corpus"],
+         ["Traces + scores", "Managed MLflow",
+          "Every run records endpoint, dataset, and\nvariant next to its CLEAR-S scores"],
+         ["Orchestration", "A Job",
+          "The whole run, data load to GEPA,\nreproduces as one notebook"]],
+        [0.17, 0.33, 0.36],
+        caption="Assembled from separate products instead, every seam is a governance boundary the eval evidence must cross.",
+        mono_data=False, align="left", fontsize=11.5, row_h=0.95,
+    )
+
+
 if __name__ == "__main__":
     two_traces()
     clears_radar()
     architecture()
     scorer_funnel()
     loop()
+    tables()
     for f in ("fig1_two_traces.png", "fig2_clears_radar.png",
-              "fig3_architecture.png", "fig4_scorer_funnel.png", "fig5_loop.png"):
+              "fig3_architecture.png", "fig4_scorer_funnel.png", "fig5_loop.png",
+              "tbl1_fix.png", "tbl2_transfer.png", "tbl3_models.png",
+              "tbl4_datasets.png", "tbl5_services.png"):
         print("wrote", OUT / f)
